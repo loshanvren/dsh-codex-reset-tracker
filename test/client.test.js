@@ -103,7 +103,11 @@ const descendants = (node) => node == null || typeof node !== 'object'
   ? [] : [node, ...(node.children || []).flatMap(descendants)];
 const visibleText = (node) => node == null ? '' : typeof node !== 'object' ? String(node)
   : node.props?.['aria-hidden'] ? '' : (node.children || []).map(visibleText).join('');
+// Every text node in the subtree, hidden ones included, joined without padding.
+const rawText = (node) => node == null ? '' : typeof node !== 'object' ? String(node)
+  : (node.children || []).map(rawText).join('');
 const dockButton = (tree) => descendants(tree).find((node) => node.props?.className === 'dcr-dock-button');
+const dockEntry = (tree) => descendants(tree).find((node) => node.props?.className === 'dcr-dock');
 const probabilityNode = (button) => descendants(button).find((node) => node.props?.className === 'dcr-chip-probability');
 const completedToday = () => {
   const value = structuredClone(fixture);
@@ -122,30 +126,70 @@ test('installation identity includes tracker in manifest, lockfile, loader and p
   assert.match(readFileSync(new URL('../cordis.patch.yml', import.meta.url), 'utf8'), /name: 'dsh-codex-reset-tracker'/);
 });
 
-test('dock displays high-confidence forecasts in either language without adding Yes', async () => {
+test('the entry registers immediately before auto-compact in the right status group', () => {
+  const { api } = client();
+  const registered = [];
+  const injected = [];
+  const ctx = {
+    effect(fn) { fn(); },
+    locale: { register: () => () => {}, bind: () => (key) => key },
+    slots: {
+      inject(name, setup) { injected.push(name); setup(); },
+      register(options) { registered.push(options); return () => {}; },
+    },
+  };
+  api.apply(ctx);
+  assert.deepEqual(injected, ['conversation.input.right']);
+  assert.deepEqual(registered.map((entry) => [entry.name, entry.id]), [
+    ['conversation.input.right', 'codex-reset-status'],
+  ]);
+  // auto-compact registers its ring in this slot with order 10.
+  const entries = [
+    { id: 'dsh-auto-compact-ring', order: 10 },
+    ...registered,
+  ].sort((left, right) => left.order - right.order);
+  assert.deepEqual(entries.map((entry) => entry.id), [
+    'codex-reset-status', 'dsh-auto-compact-ring',
+  ]);
+});
+
+test('dock shows only the forecast percentage, with no name and no reserved width', async () => {
   const c = client();
   await c.api.ensureStatus('zh-CN', false);
-  for (const [localeId, label, accessibleName] of [
-    ['zh-CN', 'Codex 重置 ≥86%', 'Codex 重置追踪状态'],
-    ['en', 'Codex Reset ≥86%', 'Codex reset status'],
-  ]) {
-    const button = dockButton(c.renderDock(localeId));
-    assert.equal(visibleText(button), label);
-    assert.equal(button.props['aria-label'], accessibleName);
-    assert.equal(button.props.title, accessibleName);
-    assert.equal(visibleText(probabilityNode(button)), '≥86%');
+  for (const localeId of ['zh-CN', 'en']) {
+    const tree = c.renderDock(localeId);
+    const button = dockButton(tree);
+    assert.equal(visibleText(button), ' ≥86%');
+    // One space plus the four label characters: the gap is part of the text.
+    assert.equal([...visibleText(button)].length, 5);
+    // Hidden reservation text would make the entry wider than what it shows.
+    assert.equal(rawText(dockEntry(tree)), ' ≥86%');
+    assert.equal(visibleText(probabilityNode(button)), ' ≥86%');
   }
+  assert.equal(dockButton(c.renderDock('zh-CN')).props['aria-label'], 'Codex 重置追踪状态');
+  assert.equal(dockButton(c.renderDock('en')).props['aria-label'], 'Codex reset status');
+});
+
+test('dock shows only the glyph while there is no forecast to report', async () => {
+  const c = client();
+  const tree = c.renderDock();
+  const button = dockButton(tree);
+  assert.equal(visibleText(button), '');
+  assert.equal(rawText(dockEntry(tree)), '');
+  assert.equal(button.props.title, 'Codex 重置追踪状态');
+  assert.equal(descendants(button).some((node) => node.tag === 'svg'), true);
+  assert.equal(probabilityNode(button), undefined);
 });
 
 test('dock uses the displayed rounded probability for the inclusive 80% threshold', async () => {
   const c = client();
   for (const [confidence, expected] of [
-    [0.79, 'Codex 重置追踪'],
-    [0.794, 'Codex 重置追踪'],
-    [0.795, 'Codex 重置 ≥80%'],
-    [0.8, 'Codex 重置 ≥80%'],
-    [0.93, 'Codex 重置 ≥93%'],
-    [1, 'Codex 重置 100%'],
+    [0.79, ''],
+    [0.794, ''],
+    [0.795, ' ≥80%'],
+    [0.8, ' ≥80%'],
+    [0.93, ' ≥93%'],
+    [1, ' 100%'],
   ]) {
     const value = structuredClone(fixture);
     value.data.nextScheduled.confidence = confidence;
@@ -157,7 +201,7 @@ test('dock uses the displayed rounded probability for the inclusive 80% threshol
 
 test('dock falls back for missing probability, invalid schedules and completed-today priority', async () => {
   const c = client();
-  assert.equal(visibleText(dockButton(c.renderDock())), 'Codex 重置追踪');
+  assert.equal(visibleText(dockButton(c.renderDock())), '');
   const changes = [
     (data) => { data.nextScheduled.confidence = null; },
     (data) => { data.nextScheduled = null; },
@@ -173,7 +217,7 @@ test('dock falls back for missing probability, invalid schedules and completed-t
     c.respond(value);
     await c.api.ensureStatus('zh-CN', true);
     const button = dockButton(c.renderDock());
-    assert.equal(visibleText(button), 'Codex 重置追踪');
+    assert.equal(visibleText(button), '');
     assert.equal(probabilityNode(button), undefined);
   }
 });
@@ -194,12 +238,12 @@ test('background refresh keeps the probability until the updated snapshot arrive
   for (const poll of c.intervals.keys()) poll();
   const pending = c.api.ensureStatus('zh-CN', false);
   assert.equal(c.api.statusStore.getSnapshot().phase, 'refreshing');
-  assert.equal(visibleText(dockButton(c.renderDock())), 'Codex 重置 ≥86%');
+  assert.equal(visibleText(dockButton(c.renderDock())), ' ≥86%');
   finish();
   await pending;
   unsubscribe();
   release();
-  assert.deepEqual(labels, ['Codex 重置 ≥86%', 'Codex 重置 ≥93%']);
+  assert.deepEqual(labels, [' ≥86%', ' ≥93%']);
 });
 
 test('failed refresh hides the dock probability until retry succeeds with a valid forecast', async () => {
@@ -225,7 +269,7 @@ test('failed refresh hides the dock probability until retry succeeds with a vali
   await pending;
   unsubscribe();
   assert.deepEqual(labels, [
-    'Codex 重置 ≥93%', 'Codex 重置追踪', 'Codex 重置追踪', 'Codex 重置 ≥99%',
+    ' ≥93%', '', '', ' ≥99%',
   ]);
 });
 
@@ -233,21 +277,21 @@ test('failed refresh uses the default label without a valid cached forecast', as
   const c = client();
   c.respond(() => { throw new Error('offline'); });
   await c.api.ensureStatus('zh-CN', true);
-  assert.equal(visibleText(dockButton(c.renderDock())), 'Codex 重置追踪');
+  assert.equal(visibleText(dockButton(c.renderDock())), '');
   c.respond(fixture);
   await c.api.ensureStatus('zh-CN', true);
   c.respond(() => { throw new Error('offline'); });
   await c.api.ensureStatus('zh-CN', true);
   c.advance(8 * 60 * 60 * 1000);
-  assert.equal(visibleText(dockButton(c.renderDock())), 'Codex 重置追踪');
+  assert.equal(visibleText(dockButton(c.renderDock())), '');
 });
 
 test('closed dock rechecks expired schedules with the current render time', async () => {
   const c = client();
   await c.api.ensureStatus('zh-CN', true);
-  assert.equal(visibleText(dockButton(c.renderDock())), 'Codex 重置 ≥86%');
+  assert.equal(visibleText(dockButton(c.renderDock())), ' ≥86%');
   c.advance(8 * 60 * 60 * 1000);
-  assert.equal(visibleText(dockButton(c.renderDock())), 'Codex 重置追踪');
+  assert.equal(visibleText(dockButton(c.renderDock())), '');
 });
 
 test('loading and receiving new reset signals never reads or writes unread storage', async () => {

@@ -1,6 +1,6 @@
 {
   "name": "dsh-codex-reset-tracker",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "type": "module",
   "description": "DeepSeek Harness plugin showing Codex reset status in the composer and exposing a read-only codex_reset tool.",
   "icon": "./icon.svg",

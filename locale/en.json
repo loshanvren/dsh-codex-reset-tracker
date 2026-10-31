@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Codex Reset Tracker",
-    "description": "Reports Codex reset probabilities, latest completed reset and upcoming schedule below the composer, with a read-only codex_reset tool for public status and records."
+    "description": "Reports Codex reset probabilities, latest completed reset and upcoming schedule from the right-hand composer status group, with a read-only codex_reset tool for public status and records."
   }
 }

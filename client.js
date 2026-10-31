@@ -18,8 +18,6 @@ window.__ModuleLoader__.load({
     const MAX_RESET_NOTICE_KEYS = 128;
     const zh = {
       'title': 'Codex 重置追踪',
-      'chipName': 'Codex 重置追踪',
-      'chipReset': 'Codex 重置',
       'refresh': '刷新 Codex 重置状态',
       'close': '关闭',
       'statusOf': 'Codex 重置追踪状态',
@@ -67,8 +65,6 @@ window.__ModuleLoader__.load({
 
     const en = {
       'title': 'Codex Reset Tracker',
-      'chipName': 'Codex Reset Tracker',
-      'chipReset': 'Codex Reset',
       'refresh': 'Refresh Codex reset status',
       'close': 'Close',
       'statusOf': 'Codex reset status',
@@ -730,15 +726,11 @@ window.__ModuleLoader__.load({
     }
 
     const CSS = `
-.dcr-dock{position:relative;display:inline-grid;flex:0 0 auto;align-items:center;min-width:0;color:var(--dsw-alias-label-primary);font:inherit}
-.dcr-dock-button,.dcr-dock-sizer{grid-area:1/1;position:relative;display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:3px 8px;border:0;box-sizing:border-box;font:inherit;font-size:12px;font-weight:550;white-space:nowrap}
-.dcr-dock-button{justify-self:start;width:max-content;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;transition:background .14s ease}
-.dcr-dock-sizer{visibility:hidden;pointer-events:none;font-weight:650}
-.dcr-dock-label-sizer{display:inline-grid}
-.dcr-dock-label-sizer>span{grid-area:1/1}
-.dcr-chip-probability,.dcr-dock-label-sizer{font-variant-numeric:tabular-nums}
-.dcr-chip-probability{color:#6d28d9}
-body[data-ds-dark-theme] .dcr-chip-probability{color:#a78bfa}
+.dcr-dock{position:relative;display:inline-flex;flex:0 0 auto;align-items:center;min-width:0;color:var(--dsw-alias-label-primary);font:inherit}
+.dcr-dock-button{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:0;min-height:28px;padding:0 6px;border:0;box-sizing:border-box;font:inherit;font-size:12px;font-weight:550;white-space:nowrap;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;transition:background .14s ease}
+.dcr-chip-probability{font-variant-numeric:tabular-nums;white-space:pre}
+.dcr-chip-probability,.dcr-summary-answer.has-probability{color:#6d28d9}
+body[data-ds-dark-theme] .dcr-chip-probability,body[data-ds-dark-theme] .dcr-summary-answer.has-probability{color:#a78bfa}
 .dcr-dock-button:hover,.dcr-dock-button[aria-expanded=true]{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);font-weight:650}
 .dcr-dock-button:focus-visible,.dcr-panel-icon-button:focus-visible,.dcr-refresh-action:focus-visible,.dcr-btn:focus-visible,.dcr-external-link:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px}
 .dcr-external-link:focus-visible{text-decoration:underline}
@@ -816,7 +808,7 @@ body[data-ds-dark-theme] .dcr-chip-probability{color:#a78bfa}
   .dcr-summary-answer.is-unknown{font-size:18px}
 }
 @media(pointer:coarse){
-  .dcr-dock-button,.dcr-dock-sizer,.dcr-panel-icon-button{min-width:44px;min-height:44px}
+  .dcr-dock-button,.dcr-panel-icon-button{min-width:44px;min-height:44px}
   .dcr-panel-icon-button{width:44px;height:44px}
   .dcr-source-link,.dcr-source-action,.dcr-refresh-action{min-height:44px}
   .dcr-refresh-action{width:44px;height:44px;min-width:44px;min-height:44px;padding:0 8px}
@@ -1158,8 +1150,10 @@ body[data-ds-dark-theme] .dcr-chip-probability{color:#a78bfa}
       const verdict = reportedVerdict(data, open ? now : Date.now());
       const chipPercent = status.phase !== 'error' && !status.error && verdict.percent !== null && verdict.percent >= 80
         ? verdict.percent : null;
+      // One literal space separates the glyph from the number: it is part of
+      // the label (` ≥93%`), so the gap is a space wide, not a CSS gap.
       const chipProbability = chipPercent === null ? ''
-        : (chipPercent === 100 ? '' : '≥') + chipPercent + '%';
+        : ' ' + (chipPercent === 100 ? '' : '≥') + chipPercent + '%';
       const refreshTitle = fetchedAt
         ? t('refreshFetched', { time: fmtAbs(new Date(fetchedAt).toISOString(), localeId) })
         : t('refresh');
@@ -1277,16 +1271,6 @@ body[data-ds-dark-theme] .dcr-chip-probability{color:#a78bfa}
         h(
           'div',
           { className: 'dcr-dock' },
-          // Reserve the current language's widest label outside the button so
-          // neighbours stay put while the hover and hit area fit visible text.
-          h('span', { className: 'dcr-dock-sizer', 'aria-hidden': true },
-            h('span', { style: { width: 16, flex: 'none' } }),
-            h('span', { className: 'dcr-dock-label-sizer' },
-              h('span', null, t('chipName')),
-              h('span', null, t('chipReset') + ' ≥88%'),
-              h('span', null, t('chipReset') + ' 100%'),
-            ),
-          ),
           h(
             'button',
             {
@@ -1300,11 +1284,11 @@ body[data-ds-dark-theme] .dcr-chip-probability{color:#a78bfa}
               onClick: () => setOpen(!open),
             },
             h('span', { className: 'dcr-dock-glyph', 'aria-hidden': true }, h(ResetGlyph, { size: 16 })),
-            h('span', { className: 'dcr-dock-label' },
-              chipProbability
-                ? [t('chipReset') + ' ', h('span', { className: 'dcr-chip-probability', key: 'probability' }, chipProbability)]
-                : t('chipName'),
-            ),
+            // The glyph alone carries the idle state; a forecast adds its
+            // percentage so the entry stays as narrow as what it reports.
+            chipProbability
+              ? h('span', { className: 'dcr-chip-probability' }, chipProbability)
+              : null,
           ),
           open
             ? h(
@@ -1403,12 +1387,14 @@ body[data-ds-dark-theme] .dcr-chip-probability{color:#a78bfa}
       ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'codex-reset: dictionaries');
       const t = ctx.locale.bind(NS);
 
-      ctx.slots.inject('conversation.composer.dock', () =>
+      // Share the right status group with auto-compact's ring (order 10),
+      // immediately before it. The composer dock is a separate row below.
+      ctx.slots.inject('conversation.input.right', () =>
         ctx.slots.register(
           {
-            name: 'conversation.composer.dock',
+            name: 'conversation.input.right',
             id: 'codex-reset-status',
-            order: -100,
+            order: 9,
             label: () => t('statusOf'),
             locale: NS,
             inject: () => ({ t, locale: ctx.locale }),
