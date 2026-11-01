@@ -729,8 +729,8 @@ window.__ModuleLoader__.load({
 .dcr-dock{position:relative;display:inline-flex;flex:0 0 auto;align-items:center;min-width:0;color:var(--dsw-alias-label-primary);font:inherit}
 .dcr-dock-button{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:0;min-height:28px;padding:0 6px;border:0;box-sizing:border-box;font:inherit;font-size:12px;font-weight:550;white-space:nowrap;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;transition:background .14s ease}
 .dcr-chip-probability{font-variant-numeric:tabular-nums;white-space:pre}
-.dcr-chip-probability,.dcr-summary-answer.has-probability{color:#6d28d9}
-body[data-ds-dark-theme] .dcr-chip-probability,body[data-ds-dark-theme] .dcr-summary-answer.has-probability{color:#a78bfa}
+.dcr-chip-probability,.dcr-summary-answer{color:#6d28d9}
+body[data-ds-dark-theme] .dcr-chip-probability,body[data-ds-dark-theme] .dcr-summary-answer{color:#a78bfa}
 .dcr-dock-button:hover,.dcr-dock-button[aria-expanded=true]{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);font-weight:650}
 .dcr-dock-button:focus-visible,.dcr-panel-icon-button:focus-visible,.dcr-refresh-action:focus-visible,.dcr-btn:focus-visible,.dcr-external-link:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px}
 .dcr-external-link:focus-visible{text-decoration:underline}
@@ -761,7 +761,7 @@ body[data-ds-dark-theme] .dcr-chip-probability,body[data-ds-dark-theme] .dcr-sum
 .dcr-status-line{box-sizing:border-box;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);align-items:stretch;gap:16px;width:100%;min-width:0;margin-top:12px;padding:16px;border-radius:12px;background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 6%,var(--dsw-alias-bg-base));color:var(--dsw-alias-label-primary);line-height:1.4;text-align:left}
 .dcr-summary-today{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:8px;min-width:0}
 .dcr-summary-question{color:var(--dsw-alias-label-secondary);font-size:13px;font-weight:500;line-height:1.4;overflow-wrap:anywhere}
-.dcr-summary-answer{color:var(--dsw-alias-state-business-primary);font-size:32px;font-weight:650;line-height:1;letter-spacing:-.025em}
+.dcr-summary-answer{font-size:32px;font-weight:650;line-height:1;letter-spacing:-.025em}
 .dcr-summary-answer.has-probability{font-size:24px;line-height:1.25;overflow-wrap:anywhere}
 .dcr-summary-answer.is-unknown{font-size:20px;line-height:1.25;letter-spacing:0}
 .dcr-summary-details{display:flex;flex-direction:column;justify-content:center;gap:10px;min-width:0;padding-left:16px;border-left:1px solid var(--dsw-alias-border-l1)}
