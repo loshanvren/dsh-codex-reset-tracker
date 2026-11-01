@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Codex 重置追踪",
-    "description": "在 composer 下方报道 Codex 重置概率、最近完成重置与下次排期，并通过 codex_reset 工具查询公开状态与记录。"
+    "description": "在输入框状态栏右侧提供入口，报道 Codex 重置概率、最近完成重置与下次排期，并通过 codex_reset 工具查询公开状态与记录。"
   }
 }
