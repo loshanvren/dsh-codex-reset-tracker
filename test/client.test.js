@@ -165,6 +165,7 @@ test('dock opens its panel in the document body while loading, ready or failed',
     assert.equal(dockButton(opened).props['aria-expanded'], true);
     assert.equal(panel.props.id, trigger.props['aria-controls']);
     assert.equal(panel.props['aria-busy'], phase === 'loading');
+    assert.equal(panel.props.tabIndex, -1);
     if (phase === 'loading') assert.match(textOf(opened), /无法确认/);
     if (phase === 'error') assert.match(textOf(opened), /network unavailable/);
 

@@ -1263,6 +1263,11 @@ body[data-ds-dark-theme] .dcr-chip-probability{color:#a78bfa}
         };
       }, [open, position && position.width, position && position.maxHeight, status.entry, status.phase]);
 
+      const panelVisible = open && position !== null;
+      useEffect(() => {
+        if (panelVisible && panelRef.current) panelRef.current.focus({ preventScroll: true });
+      }, [panelVisible]);
+
       const closeToTrigger = () => {
         setOpen(false);
         if (triggerRef.current) triggerRef.current.focus({ preventScroll: true });
@@ -1317,6 +1322,7 @@ body[data-ds-dark-theme] .dcr-chip-probability{color:#a78bfa}
                   id: panelId.current,
                   className: 'dcr-card',
                   role: 'dialog',
+                  tabIndex: -1,
                   'aria-label': t('statusOf'),
                   'aria-busy': busy,
                   style: panelStyle,
