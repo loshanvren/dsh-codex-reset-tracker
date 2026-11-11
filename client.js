@@ -2,6 +2,7 @@ window.__ModuleLoader__.load({
   id: 'dsh-codex-reset-tracker',
   factory(require) {
     const React = require('react');
+    const { createPortal } = require('react-dom');
     const { useState, useEffect, useMemo, useCallback, useLayoutEffect, useRef } = React;
     const h = React.createElement;
     const useSyncExternalStore = React.useSyncExternalStore;
@@ -1306,8 +1307,10 @@ body[data-ds-dark-theme] .dcr-chip-probability{color:#a78bfa}
                 : t('chipName'),
             ),
           ),
+          // The composer establishes a containing block. Keep viewport-based
+          // positioning by mounting the fixed panel outside it, as the slot requires.
           open
-            ? h(
+            ? createPortal(h(
                 'section',
                 {
                   ref: panelRef,
@@ -1389,7 +1392,7 @@ body[data-ds-dark-theme] .dcr-chip-probability{color:#a78bfa}
                     ),
                   ),
                 ),
-              )
+              ), document.body)
             : null,
         ),
       );

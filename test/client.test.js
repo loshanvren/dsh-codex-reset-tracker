@@ -11,6 +11,9 @@ function client(shared = {}) {
   const window = new EventTarget();
   const document = new EventTarget();
   document.visibilityState = 'visible';
+  document.body = { tag: 'body' };
+  const hooks = [];
+  let hookIndex = 0;
   const intervals = new Map();
   const timeouts = new Map();
   let clock = now;
@@ -45,17 +48,32 @@ function client(shared = {}) {
   }
   const react = {
     createElement: (tag, props, ...children) => ({ tag, props, children: children.flat(Infinity) }),
-    useState: (initial) => [typeof initial === 'function' ? initial() : initial, () => {}],
+    useState(initial) {
+      const index = hookIndex++;
+      if (!(index in hooks)) hooks[index] = typeof initial === 'function' ? initial() : initial;
+      return [hooks[index], (next) => {
+        hooks[index] = typeof next === 'function' ? next(hooks[index]) : next;
+      }];
+    },
     useEffect() {},
     useLayoutEffect() {},
     useMemo: (fn) => fn(),
     useCallback: (fn) => fn,
-    useRef: (current) => ({ current }),
+    useRef(current) {
+      const index = hookIndex++;
+      return hooks[index] ||= { current };
+    },
     useSyncExternalStore: (_subscribe, getSnapshot) => getSnapshot(),
   };
   window.__ModuleLoader__ = { load(module) {
     moduleId = module.id;
-    api = module.factory(() => react);
+    api = module.factory((name) => {
+      if (name === 'react') return react;
+      if (name === 'react-dom') return {
+        createPortal: (node, container) => ({ tag: 'portal', props: { container }, children: [node] }),
+      };
+      throw new Error('Unexpected client dependency: ' + name);
+    });
   } };
   class Clock extends Date { static now() { return clock; } }
   const globals = {
@@ -82,6 +100,7 @@ function client(shared = {}) {
     api, moduleId, window, document, intervals, timeouts, requests, storageAccesses,
     notifications, permission, storage,
     renderDock(localeId = 'zh-CN') {
+      hookIndex = 0;
       const dictionary = localeId.startsWith('zh') ? api.zh : api.en;
       const locale = { subscribe: () => () => {}, getSnapshot: () => localeId };
       const render = (node) => {
@@ -120,6 +139,41 @@ test('installation identity includes tracker in manifest, lockfile, loader and p
   assert.equal(lock.packages[''].name, name);
   assert.equal(client().moduleId, name);
   assert.match(readFileSync(new URL('../cordis.patch.yml', import.meta.url), 'utf8'), /name: 'dsh-codex-reset-tracker'/);
+});
+
+test('dock opens its panel in the document body while loading, ready or failed', () => {
+  for (const phase of ['loading', 'ready', 'error']) {
+    const c = client();
+    if (phase !== 'loading') c.api.statusStore.set({
+      phase,
+      entry: phase === 'ready' ? { data: fixture.data, at: now } : null,
+      error: phase === 'error' ? new Error('network unavailable') : null,
+      retryAt: 0,
+    });
+    const closed = c.renderDock();
+    const trigger = dockButton(closed);
+    assert.equal(trigger.props['aria-expanded'], false);
+    trigger.props.onClick();
+
+    const opened = c.renderDock();
+    const panel = descendants(opened).find((node) => node.props?.role === 'dialog');
+    assert.ok(panel, phase + ': clicking opens the panel without waiting for data');
+    const portal = descendants(opened).find((node) => node.tag === 'portal');
+    assert.ok(portal, phase + ': fixed panel must escape the contained composer');
+    assert.equal(portal.props.container, c.document.body);
+    assert.ok(descendants(portal).includes(panel));
+    assert.equal(dockButton(opened).props['aria-expanded'], true);
+    assert.equal(panel.props.id, trigger.props['aria-controls']);
+    assert.equal(panel.props['aria-busy'], phase === 'loading');
+    if (phase === 'loading') assert.match(textOf(opened), /无法确认/);
+    if (phase === 'error') assert.match(textOf(opened), /network unavailable/);
+
+    const close = descendants(panel).find((node) => node.props?.['aria-label'] === '关闭');
+    close.props.onClick();
+    const dismissed = c.renderDock();
+    assert.equal(dockButton(dismissed).props['aria-expanded'], false);
+    assert.equal(descendants(dismissed).some((node) => node.props?.role === 'dialog'), false);
+  }
 });
 
 test('dock displays high-confidence forecasts in either language without adding Yes', async () => {
