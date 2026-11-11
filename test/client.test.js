@@ -74,8 +74,9 @@ function client(shared = {}) {
   if (shared.locks) globals.navigator = { locks: shared.locks };
   const context = vm.createContext(globals);
   const instrumented = source.replace('return { name, inject, apply };', `return { name, inject, apply,
-    ResetSummary, resetHappenedToday, reportedVerdict: typeof reportedVerdict === "function" ? reportedVerdict : undefined, latestResetRecord, resetCompletionTime,
-    NoticePermissionControl, todayCompletionKeys,
+    ResetSummary, ResetHistory, TiboPost, tiboPostTextParts, selectedPostPart, resetHappenedToday, reportedVerdict: typeof reportedVerdict === "function" ? reportedVerdict : undefined, resetCompletionTime,
+    NoticePermissionControl, todayCompletionKeys, todayCompletionEvents, todayCompletionCoverage,
+    resetTypeOf, resetTypeLabelKey, completedTypeLabelKeys, resetNoticeTypeLabel, resetScopeLabel,
     ensureStatus, retainStatusPolling, statusStore, CodexResetDock, en, zh };`);
   vm.runInContext(instrumented, context);
   return {
@@ -98,6 +99,7 @@ function client(shared = {}) {
 const t = (key) => key;
 const textOf = (node) => node == null ? '' : typeof node === 'object'
   ? (node.children || []).map(textOf).join(' ') : String(node);
+const summaryText = (node) => [node.props?.['aria-label'], textOf(node)].filter(Boolean).join(' ');
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 const descendants = (node) => node == null || typeof node !== 'object'
   ? [] : [node, ...(node.children || []).flatMap(descendants)];
@@ -126,26 +128,47 @@ test('dock displays high-confidence forecasts in either language without adding 
   const c = client();
   await c.api.ensureStatus('zh-CN', false);
   for (const [localeId, label, accessibleName] of [
-    ['zh-CN', 'Codex 重置 ≥86%', 'Codex 重置追踪状态'],
-    ['en', 'Codex Reset ≥86%', 'Codex reset status'],
+    ['zh-CN', 'Codex ≥86%', 'Codex 重置追踪状态'],
+    ['en', 'Codex ≥86%', 'Codex reset status'],
   ]) {
     const button = dockButton(c.renderDock(localeId));
     assert.equal(visibleText(button), label);
-    assert.equal(button.props['aria-label'], accessibleName);
-    assert.equal(button.props.title, accessibleName);
+    assert.ok(button.props['aria-label'].startsWith(accessibleName));
+    assert.ok(button.props['aria-label'].includes('≥86%'));
+    assert.equal(descendants(button).find(n => n.props?.['data-reset-type'])?.props['data-reset-type'], 'global');
+    assert.ok(button.props.title.startsWith(accessibleName));
     assert.equal(visibleText(probabilityNode(button)), '≥86%');
+  }
+});
+
+test('dock uses a distinct accessible icon for each type without repeating its name', async () => {
+  const c = client();
+  for (const [resetType, label] of [
+    ['banked', 'banked'],
+    ['global_and_banked', 'global_and_banked'],
+    ['mystery', 'unknown'],
+  ]) {
+    const value = structuredClone(fixture);
+    value.data.nextScheduled.resetType = resetType;
+    c.respond(value);
+    await c.api.ensureStatus('zh-CN', true);
+    const button = dockButton(c.renderDock());
+    assert.equal(visibleText(button), 'Codex ≥86%', resetType);
+    const mark = descendants(button).find(n => n.props?.['data-reset-type']);
+    assert.equal(mark.props['data-reset-type'], label);
+    assert.equal(mark.props['aria-label'], c.api.zh[c.api.resetTypeLabelKey(label)]);
   }
 });
 
 test('dock uses the displayed rounded probability for the inclusive 80% threshold', async () => {
   const c = client();
   for (const [confidence, expected] of [
-    [0.79, 'Codex 重置追踪'],
-    [0.794, 'Codex 重置追踪'],
-    [0.795, 'Codex 重置 ≥80%'],
-    [0.8, 'Codex 重置 ≥80%'],
-    [0.93, 'Codex 重置 ≥93%'],
-    [1, 'Codex 重置 100%'],
+    [0.79, 'Codex'],
+    [0.794, 'Codex'],
+    [0.795, 'Codex ≥80%'],
+    [0.8, 'Codex ≥80%'],
+    [0.93, 'Codex ≥93%'],
+    [1, 'Codex 100%'],
   ]) {
     const value = structuredClone(fixture);
     value.data.nextScheduled.confidence = confidence;
@@ -157,7 +180,7 @@ test('dock uses the displayed rounded probability for the inclusive 80% threshol
 
 test('dock falls back for missing probability, invalid schedules and completed-today priority', async () => {
   const c = client();
-  assert.equal(visibleText(dockButton(c.renderDock())), 'Codex 重置追踪');
+  assert.equal(visibleText(dockButton(c.renderDock())), 'Codex');
   const changes = [
     (data) => { data.nextScheduled.confidence = null; },
     (data) => { data.nextScheduled = null; },
@@ -173,7 +196,7 @@ test('dock falls back for missing probability, invalid schedules and completed-t
     c.respond(value);
     await c.api.ensureStatus('zh-CN', true);
     const button = dockButton(c.renderDock());
-    assert.equal(visibleText(button), 'Codex 重置追踪');
+    assert.equal(visibleText(button), 'Codex');
     assert.equal(probabilityNode(button), undefined);
   }
 });
@@ -194,12 +217,12 @@ test('background refresh keeps the probability until the updated snapshot arrive
   for (const poll of c.intervals.keys()) poll();
   const pending = c.api.ensureStatus('zh-CN', false);
   assert.equal(c.api.statusStore.getSnapshot().phase, 'refreshing');
-  assert.equal(visibleText(dockButton(c.renderDock())), 'Codex 重置 ≥86%');
+  assert.equal(visibleText(dockButton(c.renderDock())), 'Codex ≥86%');
   finish();
   await pending;
   unsubscribe();
   release();
-  assert.deepEqual(labels, ['Codex 重置 ≥86%', 'Codex 重置 ≥93%']);
+  assert.deepEqual(labels, ['Codex ≥86%', 'Codex ≥93%']);
 });
 
 test('failed refresh hides the dock probability until retry succeeds with a valid forecast', async () => {
@@ -225,7 +248,7 @@ test('failed refresh hides the dock probability until retry succeeds with a vali
   await pending;
   unsubscribe();
   assert.deepEqual(labels, [
-    'Codex 重置 ≥93%', 'Codex 重置追踪', 'Codex 重置追踪', 'Codex 重置 ≥99%',
+    'Codex ≥93%', 'Codex', 'Codex', 'Codex ≥99%',
   ]);
 });
 
@@ -233,21 +256,21 @@ test('failed refresh uses the default label without a valid cached forecast', as
   const c = client();
   c.respond(() => { throw new Error('offline'); });
   await c.api.ensureStatus('zh-CN', true);
-  assert.equal(visibleText(dockButton(c.renderDock())), 'Codex 重置追踪');
+  assert.equal(visibleText(dockButton(c.renderDock())), 'Codex');
   c.respond(fixture);
   await c.api.ensureStatus('zh-CN', true);
   c.respond(() => { throw new Error('offline'); });
   await c.api.ensureStatus('zh-CN', true);
   c.advance(8 * 60 * 60 * 1000);
-  assert.equal(visibleText(dockButton(c.renderDock())), 'Codex 重置追踪');
+  assert.equal(visibleText(dockButton(c.renderDock())), 'Codex');
 });
 
 test('closed dock rechecks expired schedules with the current render time', async () => {
   const c = client();
   await c.api.ensureStatus('zh-CN', true);
-  assert.equal(visibleText(dockButton(c.renderDock())), 'Codex 重置 ≥86%');
+  assert.equal(visibleText(dockButton(c.renderDock())), 'Codex ≥86%');
   c.advance(8 * 60 * 60 * 1000);
-  assert.equal(visibleText(dockButton(c.renderDock())), 'Codex 重置追踪');
+  assert.equal(visibleText(dockButton(c.renderDock())), 'Codex');
 });
 
 test('loading and receiving new reset signals never reads or writes unread storage', async () => {
@@ -259,7 +282,7 @@ test('loading and receiving new reset signals never reads or writes unread stora
   await c.api.ensureStatus('zh-CN', true);
   assert.equal(c.storageAccesses.some(([, key]) => /unread/i.test(key)), false);
   const button = dockButton(c.renderDock());
-  assert.equal(button.props['aria-label'], 'Codex 重置追踪状态');
+  assert.equal(button.props['aria-label'], 'Codex 重置追踪状态 · 全体重置 · ≥86%');
   assert.equal(descendants(button).some((node) => node.props?.className === 'dcr-unread-dot'), false);
 });
 
@@ -270,7 +293,7 @@ test('reset completion raises one system notification and never repeats it on la
   c.respond(completedToday());
   await c.api.ensureStatus('zh-CN', true);
   assert.equal(c.notifications.length, 1);
-  assert.equal(c.notifications[0].title, 'Codex 已经重置');
+  assert.equal(c.notifications[0].title, 'Codex 已经重置（全体重置）');
   c.advance(10 * 60 * 1000);
   await c.api.ensureStatus('zh-CN', true);
   assert.equal(c.notifications.length, 1);
@@ -282,7 +305,7 @@ test('reset notification uses the active language and survives a page reload', a
   await first.api.ensureStatus('en', true);
   first.respond(completedToday());
   await first.api.ensureStatus('en', true);
-  assert.deepEqual(first.notifications.map((notice) => notice.title), ['Codex has reset']);
+  assert.deepEqual(first.notifications.map((notice) => notice.title), ['Codex has reset (Global reset)']);
   const reloaded = client({ ...shared, notifications: first.notifications });
   reloaded.respond(completedToday());
   await reloaded.api.ensureStatus('en', true);
@@ -295,7 +318,7 @@ test('reset notification reports a completion that landed while the page was clo
   const reopened = client(shared);
   reopened.respond(completedToday());
   await reopened.api.ensureStatus('zh-CN', true);
-  assert.deepEqual(reopened.notifications.map((notice) => notice.title), ['Codex 已经重置']);
+  assert.deepEqual(reopened.notifications.map((notice) => notice.title), ['Codex 已经重置（全体重置）']);
 });
 
 test('reset notification stays silent without browser permission', async () => {
@@ -322,7 +345,7 @@ test('the notification control asks for permission and states what is left to do
   const control = c.api.NoticePermissionControl({
     t: (key) => c.api.zh[key], permission: 'default', onPermission: (value) => granted.push(value),
   });
-  assert.equal(visibleText(control), '开启系统通知');
+  assert.equal(control.props['aria-label'], '开启系统通知');
   control.props.onClick();
   await flush();
   assert.equal(permission.requests, 1);
@@ -334,7 +357,8 @@ test('the notification control asks for permission and states what is left to do
     const rendered = c.api.NoticePermissionControl({
       t: (key) => c.api.zh[key], permission: state, onPermission: () => {},
     });
-    assert.equal(visibleText(rendered), label, state);
+    assert.equal(rendered.props['aria-label'], label, state);
+    assert.equal(visibleText(rendered), '', state);
     assert.equal(rendered.props.disabled, disabled, state);
   }
   assert.equal(c.api.NoticePermissionControl({ t: (key) => c.api.zh[key], permission: 'unsupported' }), null);
@@ -355,21 +379,20 @@ test('expanded schedule marks today and tomorrow by local calendar date', () => 
     data.nextScheduled.effectiveAt = target;
     const tree = api.ResetSummary({ data, t: (key) => api.zh[key], localeId: 'zh-CN', now: Date.parse(current) });
     const time = descendants(tree).find((node) => node.tag === 'time' && node.props.dateTime === target);
-    const marker = textOf(time).match(/（今天）|（明天）/)?.[0] || '';
-    assert.equal(marker, suffix, `${current} → ${target}`);
+    const marker = textOf(time).match(/今天|明天/)?.[0] || '';
+    assert.equal(marker, suffix.replace(/[（）]/g, ''), `${current} → ${target}`);
   }
 });
 
 test('captured Day 17 headline reports the source page probability and Yes', () => {
   const { api } = client();
   assert.equal(api.resetHappenedToday(fixture.data, now), false);
-  const rendered = textOf(api.ResetSummary({ data: fixture.data, t, localeId: 'zh-CN', now }));
+  const rendered = summaryText(api.ResetSummary({ data: fixture.data, t, localeId: 'zh-CN', now }));
   assert.match(rendered, /upcomingQuestion/);
   assert.match(rendered, /≥86%/);
   assert.match(rendered, /todayYes/);
   assert.doesNotMatch(rendered, /todayUnconfirmed/);
   assert.equal(api.reportedVerdict(fixture.data, now).percent, 86);
-  assert.equal(api.latestResetRecord(fixture.data).id, fixture.data.latestGlobal.id);
 });
 
 test('confirmed completion today switches to yes; an elapsed schedule never does', () => {
@@ -377,7 +400,7 @@ test('confirmed completion today switches to yes; an elapsed schedule never does
   const data = structuredClone(fixture.data);
   data.latestGlobal.completedAt = '2026-10-22T09:00:00Z';
   assert.equal(api.resetHappenedToday(data, now), true);
-  assert.match(textOf(api.ResetSummary({ data, t, localeId: 'en', now })), /todayYes/);
+  assert.match(summaryText(api.ResetSummary({ data, t, localeId: 'en', now })), /todayYes/);
   data.latestGlobal = null;
   data.latestBanked = null;
   data.nextScheduled.scheduleState = 'elapsed';
@@ -471,7 +494,7 @@ test('reported probability has no invented threshold and preserves exact 100%', 
   const data = structuredClone(fixture.data);
   for (const [confidence, expected] of [[0.8, '≥80%'], [0.65, '≥65%'], [1, '100%']]) {
     data.nextScheduled.confidence = confidence;
-    const rendered = textOf(api.ResetSummary({ data, t, localeId: 'en', now }));
+    const rendered = summaryText(api.ResetSummary({ data, t, localeId: 'en', now }));
     assert.ok(rendered.includes(expected));
     assert.match(rendered, /todayYes/);
   }
@@ -481,11 +504,11 @@ test('missing confidence is not fabricated and no schedule uses the source daily
   const { api } = client();
   const data = structuredClone(fixture.data);
   data.nextScheduled.confidence = null;
-  let rendered = textOf(api.ResetSummary({ data, t, localeId: 'en', now }));
+  let rendered = summaryText(api.ResetSummary({ data, t, localeId: 'en', now }));
   assert.doesNotMatch(rendered, /%/);
   assert.match(rendered, /upcomingQuestion/);
   data.nextScheduled = null;
-  rendered = textOf(api.ResetSummary({ data, t, localeId: 'en', now }));
+  rendered = summaryText(api.ResetSummary({ data, t, localeId: 'en', now }));
   assert.match(rendered, /todayQuestion/);
   assert.match(rendered, /todayNo/);
   assert.doesNotMatch(rendered, /todayYes|%/);
@@ -495,7 +518,7 @@ test('completed today takes priority over a pending forecast without changing re
   const { api } = client();
   const data = structuredClone(fixture.data);
   data.latestGlobal.completedAt = '2026-10-22T09:00:00Z';
-  const rendered = textOf(api.ResetSummary({ data, t, localeId: 'en', now }));
+  const rendered = summaryText(api.ResetSummary({ data, t, localeId: 'en', now }));
   assert.match(rendered, /todayQuestion/);
   assert.match(rendered, /todayYes/);
   assert.doesNotMatch(rendered, /%|upcomingQuestion/);
@@ -509,7 +532,7 @@ test('a multi-day explicit schedule covering now reports Yes without inventing c
   data.nextScheduled.scheduleWindow = {
     startAt: '2026-10-20T18:00:00Z', endAt: '2026-10-23T18:00:00Z',
   };
-  const rendered = textOf(api.ResetSummary({ data, t, localeId: 'en', now }));
+  const rendered = summaryText(api.ResetSummary({ data, t, localeId: 'en', now }));
   assert.match(rendered, /todayYes/);
   assert.doesNotMatch(rendered, /%/);
 });
@@ -568,4 +591,306 @@ test('a previously announced completion remains deduped after a newer snapshot',
   c.respond(a);
   await c.api.ensureStatus('en', true);
   assert.equal(c.notifications.length, 2);
+});
+
+// ---- Reset-type regression (all fixture values below are synthetic test data) ----
+
+const completeTodaySlot = (slot, resetType, at = '2026-10-22T09:30:00Z') => {
+  const value = structuredClone(fixture);
+  value.data[slot].kind = 'reset_completed';
+  value.data[slot].resetType = resetType;
+  value.data[slot].completedAt = at;
+  return value;
+};
+
+test('type helpers keep unknown or missing values explicit without inventing global', () => {
+  const { api } = client();
+  for (const [value, expected] of [
+    ['global', 'typeGlobal'], ['banked', 'typeBanked'], ['global_and_banked', 'typeGlobalBanked'],
+    ['weird', 'typeUnknown'], ['', 'typeUnknown'], [undefined, 'typeUnknown'], [null, 'typeUnknown'],
+  ]) {
+    assert.equal(api.resetTypeLabelKey(api.resetTypeOf({ resetType: value })), expected, String(value));
+  }
+  assert.deepEqual([...api.completedTypeLabelKeys({ global: true, banked: false, unknown: false })], ['typeGlobal']);
+  assert.deepEqual([...api.completedTypeLabelKeys({ global: false, banked: true, unknown: true })], ['typeBanked', 'typeUnknown']);
+  assert.deepEqual([...api.completedTypeLabelKeys({ global: true, banked: true, unknown: true })], ['typeGlobalBanked', 'typeUnknown']);
+  assert.deepEqual([...api.completedTypeLabelKeys({ global: false, banked: false, unknown: false })], []);
+});
+
+test('completing only banked today keeps the pending global forecast visible', () => {
+  const { api } = client();
+  const value = completeTodaySlot('latestBanked', 'banked');
+  const verdict = api.reportedVerdict(value.data, now);
+  assert.equal(verdict.scheduled, true);
+  assert.equal(verdict.type, 'global');
+  assert.equal(verdict.percent, 86);
+  const rendered = summaryText(api.ResetSummary({ data: value.data, t, localeId: 'en', now }));
+  assert.match(rendered, /upcomingQuestion/);
+  assert.match(rendered, /typeGlobal/);
+  assert.match(rendered, /todayQuestion todayYes/);
+});
+
+test('completing only global today keeps the pending banked forecast visible', () => {
+  const { api } = client();
+  const value = completeTodaySlot('latestGlobal', 'global');
+  value.data.nextScheduled.resetType = 'banked';
+  const verdict = api.reportedVerdict(value.data, now);
+  assert.equal(verdict.scheduled, true);
+  assert.equal(verdict.type, 'banked');
+  assert.equal(verdict.percent, 86);
+});
+
+test('a joint schedule stays visible until both kinds completed, then reports the joint conclusion', () => {
+  const { api } = client();
+  const partial = completeTodaySlot('latestBanked', 'banked');
+  partial.data.nextScheduled.resetType = 'global_and_banked';
+  let verdict = api.reportedVerdict(partial.data, now);
+  assert.equal(verdict.scheduled, true);
+  assert.equal(verdict.type, 'global_and_banked');
+  const separate = structuredClone(partial);
+  separate.data.latestGlobal.kind = 'reset_completed';
+  separate.data.latestGlobal.resetType = 'global';
+  separate.data.latestGlobal.completedAt = '2026-10-22T10:30:00Z';
+  verdict = api.reportedVerdict(separate.data, now);
+  assert.equal(verdict.scheduled, false);
+  assert.equal(verdict.answerKey, 'todayYes');
+  const rendered = summaryText(api.ResetSummary({ data: separate.data, t, localeId: 'en', now }));
+  assert.match(rendered, /typeGlobalBanked/);
+  assert.doesNotMatch(rendered, /upcomingQuestion/);
+});
+
+test('one joint completion covers both kinds and its double-slot snapshot stays joint', () => {
+  const { api } = client();
+  const value = completeTodaySlot('latestGlobal', 'global_and_banked', '2026-10-22T10:00:00Z');
+  value.data.nextScheduled.resetType = 'global_and_banked';
+  value.data.latestBanked = structuredClone(value.data.latestGlobal);
+  const verdict = api.reportedVerdict(value.data, now);
+  assert.equal(verdict.scheduled, false);
+  assert.equal(verdict.answerKey, 'todayYes');
+  const rendered = summaryText(api.ResetSummary({ data: value.data, t: (key) => api.zh[key], localeId: 'zh-CN', now }));
+  assert.match(rendered, /全体重置 \+ 重置卡/);
+  assert.doesNotMatch(rendered, /upcomingQuestion/);
+});
+
+test('an unknown-type completion never suppresses a typed forecast and stays unknown alone', () => {
+  const { api } = client();
+  const withForecast = completeTodaySlot('latestGlobal', 'weird');
+  let verdict = api.reportedVerdict(withForecast.data, now);
+  assert.equal(verdict.scheduled, true);
+  assert.equal(verdict.type, 'global');
+  assert.equal(verdict.percent, 86);
+  assert.equal(api.todayCompletionCoverage(withForecast.data, now).unknown, true);
+  const alone = structuredClone(withForecast);
+  alone.data.nextScheduled = null;
+  verdict = api.reportedVerdict(alone.data, now);
+  assert.equal(verdict.scheduled, false);
+  assert.equal(verdict.answerKey, 'todayYes');
+  const rendered = summaryText(api.ResetSummary({ data: alone.data, t, localeId: 'en', now }));
+  assert.match(rendered, /typeUnknown/);
+  assert.doesNotMatch(rendered, /typeGlobal|upcomingQuestion/);
+});
+
+test('an unknown-type schedule keeps its forecast even when an unknown reset completed', () => {
+  const { api } = client();
+  const value = completeTodaySlot('latestGlobal', 'weird');
+  value.data.nextScheduled.resetType = 'mystery';
+  const verdict = api.reportedVerdict(value.data, now);
+  assert.equal(verdict.scheduled, true);
+  assert.equal(verdict.type, 'unknown');
+});
+
+test('unknown completion times preserve a valid forecast without claiming a completion', () => {
+  const { api } = client();
+  const value = structuredClone(fixture);
+  for (const record of [value.data.latestGlobal, value.data.latestBanked]) {
+    record.completedAt = null;
+    record.effectiveAt = null;
+    record.announcedAt = null;
+  }
+  assert.equal(api.resetHappenedToday(value.data, now), null);
+  for (const type of ['global', 'banked', 'global_and_banked', 'future_type', null]) {
+    value.data.nextScheduled.resetType = type;
+    const verdict = api.reportedVerdict(value.data, now);
+    assert.equal(verdict.scheduled, true, String(type));
+    assert.equal(verdict.percent, 86, String(type));
+    assert.equal(verdict.completed, null, String(type));
+    assert.equal(verdict.type, type === 'future_type' || type === null ? 'unknown' : type);
+  }
+  value.data.nextScheduled = null;
+  assert.equal(api.reportedVerdict(value.data, now).answerKey, 'todayUnknown');
+});
+
+test('today completion events carry types and dedupe a joint record across slots', () => {
+  const { api } = client();
+  const value = structuredClone(fixture);
+  value.data.nextScheduled = null;
+  const joint = structuredClone(value.data.latestBanked);
+  joint.kind = 'reset_completed';
+  joint.resetType = 'global_and_banked';
+  joint.completedAt = '2026-10-22T10:00:00Z';
+  joint.id = 'joint-1';
+  value.data.latestGlobal = structuredClone(joint);
+  value.data.latestBanked = structuredClone(joint);
+  const events = api.todayCompletionEvents(value.data, now);
+  assert.deepEqual([...events.map((event) => event.key)], ['id:joint-1']);
+  assert.deepEqual([...events.map((event) => event.type)], ['global_and_banked']);
+});
+
+test('same-day sequential completions of different types notify separately with their types', async () => {
+  const c = client();
+  await c.api.ensureStatus('zh-CN', true);
+  c.respond(completeTodaySlot('latestGlobal', 'global', '2026-10-22T09:00:00Z'));
+  await c.api.ensureStatus('zh-CN', true);
+  assert.deepEqual(c.notifications.map((notice) => notice.title), ['Codex 已经重置（全体重置）']);
+  const value = completeTodaySlot('latestGlobal', 'global', '2026-10-22T09:00:00Z');
+  value.data.latestBanked = {
+    ...structuredClone(fixture.data.latestBanked),
+    id: 'banked-done',
+    resetType: 'banked',
+    completedAt: '2026-10-22T10:00:00Z',
+  };
+  c.respond(value);
+  await c.api.ensureStatus('zh-CN', true);
+  assert.deepEqual(c.notifications.map((notice) => notice.title), [
+    'Codex 已经重置（全体重置）', 'Codex 已经重置（重置卡）',
+  ]);
+});
+
+test('fresh global and banked completions in one snapshot announce the combined type once', async () => {
+  const c = client();
+  await c.api.ensureStatus('zh-CN', true);
+  const value = structuredClone(fixture);
+  value.data.nextScheduled = null;
+  value.data.latestGlobal.completedAt = '2026-10-22T09:00:00Z';
+  value.data.latestBanked.completedAt = '2026-10-22T09:30:00Z';
+  c.respond(value);
+  await c.api.ensureStatus('zh-CN', true);
+  assert.deepEqual(c.notifications.map((notice) => notice.title), ['Codex 已经重置（全体重置 + 重置卡）']);
+});
+
+test('compact history sorts by completion time and keeps both accessible type labels', () => {
+  const { api } = client();
+  const value = structuredClone(fixture);
+  value.data.nextScheduled = null;
+  value.data.latestGlobal.completedAt = '2026-10-22T08:00:00Z';
+  const tree = api.ResetHistory({ data: value.data, t: (key) => api.zh[key], localeId: 'zh-CN', now });
+  const rows = descendants(tree).filter(n => n.props?.className === 'dcr-summary-latest');
+  assert.equal(rows.length, 2);
+  assert.match(rows[0].props['aria-label'], /最近全体重置/);
+  assert.match(rows[1].props['aria-label'], /最近重置卡/);
+  assert.ok(rows.every(row => descendants(row).some(n => n.tag === 'time')));
+  assert.doesNotMatch(textOf(tree), /最近全体重置|全体重置 \+ 重置卡/);
+  value.data.latestBanked.completedAt = '2026-10-22T09:00:00Z';
+  const reversed = api.ResetHistory({ data: value.data, t: (key) => api.zh[key], localeId: 'zh-CN', now });
+  const reversedRows = descendants(reversed).filter(n => n.props?.className === 'dcr-summary-latest');
+  assert.match(reversedRows[0].props['aria-label'], /最近重置卡/);
+  assert.match(reversedRows[1].props['aria-label'], /最近全体重置/);
+  for (const field of ['completedAt', 'effectiveAt', 'announcedAt']) {
+    value.data.latestGlobal[field] = 'invalid time';
+  }
+  const undated = api.ResetHistory({ data: value.data, t: (key) => api.zh[key], localeId: 'zh-CN', now });
+  const undatedRows = descendants(undated).filter(n => n.props?.className === 'dcr-summary-latest');
+  assert.match(undatedRows[0].props['aria-label'], /最近重置卡/);
+  assert.match(textOf(undatedRows[1]), /时间未知/);
+  const joint = {...value.data.latestGlobal, resetType: 'global_and_banked'};
+  value.data.latestGlobal = joint;
+  value.data.latestBanked = structuredClone(joint);
+  const joined = api.ResetHistory({ data: value.data, t: (key) => api.zh[key], localeId: 'zh-CN', now });
+  const joinedRows = descendants(joined).filter(n => n.props?.className === 'dcr-summary-latest');
+  assert.ok(joinedRows.every(row => row.props.title.includes('全体重置 + 重置卡')));
+});
+
+test('the dock reserves its compact forecast width in both languages', () => {
+  const c = client();
+  for (const localeId of ['zh-CN', 'en']) {
+    const tree = c.renderDock(localeId);
+    const dockDiv = descendants(tree).find((node) => node.props?.className === 'dcr-dock');
+    const label = textOf(dockDiv);
+    assert.ok(label.includes('≥88%'), label);
+    assert.ok(label.includes('100%'), label);
+  }
+});
+
+test('the primary heading explicitly reports no completion despite a future forecast', () => {
+  const { api } = client();
+  const tree = api.ResetSummary({data: fixture.data, t: (key) => api.zh[key], localeId: 'zh-CN', now});
+  const forecast = descendants(tree).find(n => n.props?.className === 'dcr-forecast');
+  const answer = descendants(forecast).find(n => n.props?.className === 'dcr-reset-state');
+  assert.equal(textOf(answer), '否');
+  assert.match(tree.props['aria-label'], /今天重置了吗？ 否/);
+  assert.equal(descendants(forecast).some(n => n.tag === 'svg'), false);
+  assert.match(textOf(forecast), /明天 02:00/);
+  assert.match(textOf(forecast), /≥86%/);
+});
+
+test('the primary answer is yes for every confirmed reset type', () => {
+  const { api } = client();
+  for (const [slot, type, forecastType] of [
+    ['latestBanked', 'banked', 'global'],
+    ['latestGlobal', 'global', 'banked'],
+    ['latestGlobal', 'global_and_banked', 'global_and_banked'],
+    ['latestGlobal', 'future_type', 'global'],
+  ]) {
+    const value = completeTodaySlot(slot, type);
+    value.data.nextScheduled.resetType = forecastType;
+    for (const [localeId, messages, expected] of [['zh-CN', api.zh, '是'], ['en', api.en, 'Yes']]) {
+      const tree = api.ResetSummary({data: value.data, t: (key) => messages[key], localeId, now});
+      const answer = descendants(tree).find(n => n.props?.className === 'dcr-reset-state');
+      assert.equal(textOf(answer), expected);
+    }
+  }
+});
+
+test('unknown completion timestamps stay explicitly unknown while the valid forecast remains', () => {
+  const { api } = client();
+  const data = structuredClone(fixture.data);
+  for (const record of [data.latestGlobal, data.latestBanked]) {
+    record.completedAt = record.effectiveAt = record.announcedAt = null;
+  }
+  const tree = api.ResetSummary({data, t: (key) => api.zh[key], localeId: 'zh-CN', now});
+  const heading = descendants(tree).find(n => n.tag === 'h3');
+  const answer = descendants(heading).find(n => n.props?.className === 'dcr-reset-state');
+  assert.equal(textOf(answer), '—');
+  assert.equal(heading.props['aria-label'], '今天重置了吗？ 无法确认');
+  assert.match(textOf(tree), /≥86%/);
+});
+
+test('a source post renders one language and offers a single button for the other', () => {
+  const { api } = client();
+  for (const [localeId, expected, switchLabel] of [
+    ['zh-CN', fixture.data.nextScheduled.translatedText, 'English'],
+    ['en', fixture.data.nextScheduled.text, '中文'],
+  ]) {
+    const post = api.TiboPost({data: fixture.data, localeId, t: (key) => api.en[key]});
+    assert.equal(post.tag, 'article');
+    const source = descendants(post).find(n => n.tag === 'a');
+    assert.equal(source.props.href, fixture.data.nextScheduled.source.url);
+    const paragraphs = descendants(post).filter(n => n.props?.className === 'dcr-tibo-text');
+    assert.equal(paragraphs.length, 1);
+    assert.equal(paragraphs[0].props.lang, localeId);
+    assert.equal(textOf(paragraphs[0]), expected);
+    const controls = descendants(post).filter(n => n.props?.className === 'dcr-post-language');
+    assert.equal(controls.length, 1);
+    assert.equal(textOf(controls[0]), switchLabel);
+  }
+});
+
+test('missing translation falls back to available source text without inventing a translation', () => {
+  const { api } = client();
+  const data = structuredClone(fixture.data);
+  data.nextScheduled.translatedText = null;
+  const post = api.TiboPost({data, localeId: 'zh-CN', preferredLanguage: 'zh-CN', t: (key) => api.zh[key]});
+  const paragraph = descendants(post).find(n => n.props?.className === 'dcr-tibo-text');
+  assert.equal(paragraph.props.lang, 'en');
+  assert.equal(textOf(paragraph), data.nextScheduled.text);
+  assert.equal(descendants(post).some(n => n.props?.className === 'dcr-post-language'), false);
+});
+
+test('source language selection calls the supplied handler with the requested language', () => {
+  const { api } = client();
+  const changes = [];
+  const post = api.TiboPost({data: fixture.data, localeId: 'zh-CN', t, onLanguageChange: language => changes.push(language)});
+  const english = descendants(post).find(n => n.props?.className === 'dcr-post-language' && textOf(n) === 'English');
+  english.props.onClick();
+  assert.deepEqual(changes, ['en']);
 });

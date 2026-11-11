@@ -72,10 +72,31 @@ function pickPositiveInt(value, max) {
   return Math.min(Math.floor(value), max);
 }
 
+const RESET_TYPE_LEGEND =
+  'resetType legend: global = global reset (全体重置); ' +
+  'banked = banked reset card (重置卡); ' +
+  'global_and_banked = one event covering both kinds. ' +
+  'A record\'s kind (reset_scheduled / reset_completed) is separate from its resetType; ' +
+  'scope reports the affected plans and usage windows separately.';
+
+/**
+ * Human-readable type explanation that keeps the raw value visible. Missing
+ * or unknown values are reported as unknown, never guessed as global or joint.
+ */
+function describeResetType(value) {
+  if (value === 'global') return 'type global (global reset)';
+  if (value === 'banked') return 'type banked (banked reset)';
+  if (value === 'global_and_banked') return 'type global_and_banked (one event covering both global and banked resets)';
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return 'type unknown (not declared by the API)';
+  }
+  return `type ${value} (unknown reset type)`;
+}
+
 function describeRecord(prefix, record) {
   if (!record) return `${prefix}: none`;
   const when = record.effectiveAt || record.completedAt || record.announcedAt || 'unknown time';
-  const bits = [`${prefix}: ${record.resetType || 'unknown type'}`, when];
+  const bits = [`${prefix}: ${describeResetType(record.resetType)}`, when];
   if (record.kind === 'reset_scheduled' && record.scheduleState) bits.push(record.scheduleState);
   if (typeof record.confidence === 'number') bits.push(`confidence ${record.confidence}`);
   const quote = (record.text || '').split('\n')[0].slice(0, 160);
@@ -91,6 +112,8 @@ function renderStatus(value) {
   if (value.meta && value.meta.generatedAt) lines.push(`snapshot generated at ${value.meta.generatedAt}`);
   if (data.currentTime) lines.push(`server currentTime: ${data.currentTime}`);
   if (data.timeZone) lines.push(`site time zone: ${data.timeZone}`);
+  lines.push('');
+  lines.push(RESET_TYPE_LEGEND);
   lines.push('');
   lines.push(describeRecord('Next scheduled', data.nextScheduled));
   lines.push(describeRecord('Latest global reset', data.latestGlobal));
@@ -109,6 +132,8 @@ function renderRecords(value) {
     `Codex reset records (kind=${value.query.kind}, page ${data.page || 1} of ${data.totalPages || 1}, ${data.total || 0} total)`,
   ];
   if (value.meta && value.meta.generatedAt) lines.push(`snapshot generated at ${value.meta.generatedAt}`);
+  lines.push('');
+  lines.push(RESET_TYPE_LEGEND);
   lines.push('');
   if (items.length === 0) lines.push('(no records on this page)');
   for (const item of items) {
@@ -131,6 +156,7 @@ function buildTool(config) {
       'Query didcodexreset.com public signals about Codex usage-limit resets. ' +
       'action "status" returns the next scheduled reset plus the latest confirmed global and banked resets; ' +
       'action "records" returns one page of history (kind: all | reset_scheduled | reset_completed, up to 10 per page). ' +
+      'Every record carries resetType: global | banked | global_and_banked; kind (scheduled/completed) is a separate axis. ' +
       'Read-only, no key; responses are cached ~60s and the shared quota is 60 requests/hour.',
 
     parameters: {
@@ -194,5 +220,9 @@ export function apply(ctx, config) {
   const resolved = Config(config || {});
   ctx.effect(() => ctx.tools.register(buildTool(resolved)), 'codex-reset: codex_reset tool');
 }
+
+// Exported for regression tests only; unused at runtime.
+export const buildToolForTests = buildTool;
+export const describeResetTypeForTests = describeResetType;
 
 export const inject = ['tools'];
