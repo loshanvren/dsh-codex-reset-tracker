@@ -17,9 +17,8 @@ window.__ModuleLoader__.load({
     const RESET_NOTICE_STORAGE_KEY = 'dsh-codex-reset-tracker.reset-notice.v1';
     const MAX_RESET_NOTICE_KEYS = 128;
     const zh = {
-      'title': 'Codex 重置追踪',
-      'chipName': 'Codex 重置追踪',
-      'chipReset': 'Codex 重置',
+      'title': 'Codex 重置',
+      'chipName': 'Codex',
       'refresh': '刷新 Codex 重置状态',
       'close': '关闭',
       'statusOf': 'Codex 重置追踪状态',
@@ -35,13 +34,14 @@ window.__ModuleLoader__.load({
       'retryAfter': '请求过于频繁，请 {n} 秒后重试。',
       'retryIn': '{n} 秒后重试',
       'retry': '重试',
-      'typeGlobal': 'Global',
+      'typeGlobal': '全体重置',
       'typeBanked': '重置卡',
-      'typeGlobalBanked': '全局 + 重置卡',
-      'typeUnknown': '范围未知',
+      'typeGlobalBanked': '全体重置 + 重置卡',
+      'typeUnknown': '类型未知',
       'precisionDate': '按日期排期',
       'noTime': '时间未知',
-      'latestReset': '最近完成重置',
+      'latestGlobalLabel': '最近全体重置',
+      'latestBankedLabel': '最近重置卡',
       'noResetSummary': '暂无重置记录',
       'todayQuestion': '今天重置了吗？',
       'todayYes': '是',
@@ -55,20 +55,29 @@ window.__ModuleLoader__.load({
       'nextScheduleLabel': '预计下次重置',
       'scheduleToday': '（今天）',
       'scheduleTomorrow': '（明天）',
-      'viewOriginal': '查看原帖',
       'dataSource': '数据来源',
       'refreshFetched': '刷新；上次获取于 {time}',
       'openTiboPost': '打开 Tibo 原帖',
       'notifyReset': 'Codex 已经重置',
+      'notifyResetTyped': 'Codex 已经重置（{type}）',
+      'compactGlobal': '全体',
+      'compactBanked': '重置卡',
+      'compactRecent': '最近重置',
+      'compactForecast': '预计重置',
+      'expectedShort': '预计',
+      'compactNone': '今天暂无重置',
+      'compactUnknown': '状态待确认',
+      'compactNext': '下次',
+      'compactUpdated': '{time} 更新',
+      'sourcePost': '来源公告',
       'notifyAsk': '开启系统通知',
       'notifyOn': '系统通知已开启',
       'notifyBlocked': '系统通知已被阻止',
     };
 
     const en = {
-      'title': 'Codex Reset Tracker',
-      'chipName': 'Codex Reset Tracker',
-      'chipReset': 'Codex Reset',
+      'title': 'Codex Reset',
+      'chipName': 'Codex',
       'refresh': 'Refresh Codex reset status',
       'close': 'Close',
       'statusOf': 'Codex reset status',
@@ -84,13 +93,14 @@ window.__ModuleLoader__.load({
       'retryAfter': 'Rate limited. Retry in {n}s.',
       'retryIn': 'Retry in {n}s',
       'retry': 'Retry',
-      'typeGlobal': 'Global',
-      'typeBanked': 'Banked',
-      'typeGlobalBanked': 'Global + Banked',
-      'typeUnknown': 'Unknown scope',
+      'typeGlobal': 'Global reset',
+      'typeBanked': 'Banked reset',
+      'typeGlobalBanked': 'Global + Banked reset',
+      'typeUnknown': 'Unknown type',
       'precisionDate': 'date-level schedule',
       'noTime': 'time unknown',
-      'latestReset': 'Latest completed reset',
+      'latestGlobalLabel': 'Latest global reset',
+      'latestBankedLabel': 'Latest banked reset',
       'noResetSummary': 'No reset record',
       'todayQuestion': 'Reset today?',
       'todayYes': 'Yes',
@@ -104,11 +114,21 @@ window.__ModuleLoader__.load({
       'nextScheduleLabel': 'Next expected reset',
       'scheduleToday': '(Today)',
       'scheduleTomorrow': '(Tomorrow)',
-      'viewOriginal': 'View original post',
       'dataSource': 'Source',
       'refreshFetched': 'Refresh; last fetched {time}',
       'openTiboPost': 'Open Tibo post',
       'notifyReset': 'Codex has reset',
+      'notifyResetTyped': 'Codex has reset ({type})',
+      'compactGlobal': 'Global',
+      'compactBanked': 'Banked',
+      'compactRecent': 'Recent resets',
+      'compactForecast': 'Expected reset',
+      'expectedShort': 'Expected',
+      'compactNone': 'No reset today',
+      'compactUnknown': 'Status unavailable',
+      'compactNext': 'Next',
+      'compactUpdated': 'Updated {time}',
+      'sourcePost': 'Source announcement',
       'notifyAsk': 'Enable notifications',
       'notifyOn': 'Notifications on',
       'notifyBlocked': 'Notifications blocked',
@@ -269,7 +289,52 @@ window.__ModuleLoader__.load({
       }
     }
 
-    function resetHappenedToday(data, now) {
+    // Reset types declared by the upstream OpenAPI. `kind` (scheduled/completed)
+    // is a different axis and never substitutes for a type.
+    const RESET_TYPE_VALUES = ['global', 'banked', 'global_and_banked'];
+
+    /** Canonical type value, or null when the value is missing or unknown. */
+    function resetTypeOf(record) {
+      const value = record && record.resetType;
+      return RESET_TYPE_VALUES.includes(value) ? value : null;
+    }
+
+    function resetTypeLabelKey(type) {
+      if (type === 'global') return 'typeGlobal';
+      if (type === 'banked') return 'typeBanked';
+      if (type === 'global_and_banked') return 'typeGlobalBanked';
+      return 'typeUnknown';
+    }
+
+    /** Which completion kinds a record's type covers; unknown types attribute nothing. */
+    function resetTypeCoverage(type) {
+      return {
+        global: type === 'global' || type === 'global_and_banked',
+        banked: type === 'banked' || type === 'global_and_banked',
+      };
+    }
+
+    /** Label keys describing today's completed coverage, unknown listed explicitly. */
+    function completedTypeLabelKeys(coverage) {
+      if (!coverage) return ['typeUnknown'];
+      const keys = [];
+      if (coverage.global && coverage.banked) keys.push('typeGlobalBanked');
+      else {
+        if (coverage.global) keys.push('typeGlobal');
+        if (coverage.banked) keys.push('typeBanked');
+      }
+      if (coverage.unknown) keys.push('typeUnknown');
+      return keys;
+    }
+
+    /**
+     * Per-type completion coverage for the browser-local day. Returns
+     * {global, banked, unknown} booleans, or null when the day cannot be
+     * determined or completion records exist that cannot be interpreted.
+     * Unknown resetType completions count as "a reset happened" (unknown) but
+     * never attribute to global or banked.
+     */
+    function todayCompletionCoverage(data, now) {
       if (!data) return null;
       const hasResetSummaryData = ['latestGlobal', 'latestBanked', 'nextScheduled']
         .some((field) => Object.prototype.hasOwnProperty.call(data, field));
@@ -281,8 +346,10 @@ window.__ModuleLoader__.load({
       const today = dateKeyAt(currentAt, timeZone);
       if (!today) return null;
 
+      const coverage = { global: false, banked: false, unknown: false };
       const records = [data.latestGlobal, data.latestBanked].filter(Boolean);
-      if (!records.length) return false;
+      if (!records.length) return coverage;
+      let sawCompletion = false;
       let unresolved = false;
       for (const record of records) {
         if (record.kind === 'reset_scheduled') continue;
@@ -296,25 +363,62 @@ window.__ModuleLoader__.load({
           unresolved = true;
           continue;
         }
-        if (eventDay === today) return true;
+        if (eventDay !== today) continue;
+        sawCompletion = true;
+        const type = resetTypeOf(record);
+        const covers = resetTypeCoverage(type);
+        if (covers.global) coverage.global = true;
+        if (covers.banked) coverage.banked = true;
+        if (!type) coverage.unknown = true;
       }
-      return unresolved ? null : false;
+      if (!sawCompletion && unresolved) return null;
+      return coverage;
+    }
+
+    function resetHappenedToday(data, now) {
+      return hasCompletion(todayCompletionCoverage(data, now));
+    }
+
+    function hasCompletion(coverage) {
+      if (coverage === null) return null;
+      return coverage.global || coverage.banked || coverage.unknown;
+    }
+
+    function completionAnswerKey(coverage) {
+      const completed = hasCompletion(coverage);
+      if (completed === null) return 'todayUnknown';
+      return completed ? 'todayYes' : 'todayNo';
     }
 
     // Report the public page's live-schedule headline: confidence + Yes.
     // This presentation never changes the schedule into a completion record.
+    // Suppressing a forecast is per type: completing only banked today keeps a
+    // pending global forecast visible, and a joint schedule needs both kinds
+    // completed before a completion conclusion replaces it.
     function reportedVerdict(data, now) {
-      const completedToday = resetHappenedToday(data, now);
+      const coverage = todayCompletionCoverage(data, now);
       const daily = {
         questionKey: 'todayQuestion',
-        answerKey: completedToday === null ? 'todayUnknown' : completedToday ? 'todayYes' : 'todayNo',
+        answerKey: completionAnswerKey(coverage),
         percent: null,
         scheduled: false,
+        type: null,
+        completed: coverage,
       };
-      if (completedToday === true) return daily;
       const next = data && data.nextScheduled;
       if (!next || next.kind !== 'reset_scheduled' ||
           (next.scheduleState && next.scheduleState !== 'pending')) return daily;
+      // A schedule with an unknown type can never be counted as covered: an
+      // unknown completion must not be assumed to be the same event. Its
+      // forecast therefore stays visible and is labelled as unknown.
+      const type = resetTypeOf(next);
+      const needed = type === null ? null : resetTypeCoverage(type);
+      // Unknown historical completion times do not invalidate a known future
+      // schedule; only confirmed coverage may suppress its forecast.
+      const covered = coverage !== null && needed !== null && (needed.global
+        ? needed.banked ? coverage.global && coverage.banked : coverage.global
+        : coverage.banked);
+      if (covered) return daily;
       const window = next.scheduleWindow;
       const target = (window && (window.endAt || window.startAt)) || next.effectiveAt;
       const targetAt = Date.parse(target || '');
@@ -335,22 +439,23 @@ window.__ModuleLoader__.load({
           ? 'todayYes' : 'todayNo',
         percent,
         scheduled: true,
+        type: type === null ? 'unknown' : type,
+        completed: coverage,
       };
     }
 
-    function latestResetRecord(data) {
-      const records = data ? [data.latestGlobal, data.latestBanked].filter(Boolean) : [];
-      if (!records.length) return null;
-      return records
-        .map((record, index) => {
-          const time = resetCompletionTime(record);
-          return { record, index, at: time ? Date.parse(time.value) : NaN };
+    function recentResetEntries(data) {
+      return [
+        { record: data?.latestGlobal, labelKey: 'latestGlobalLabel' },
+        { record: data?.latestBanked, labelKey: 'latestBankedLabel' },
+      ].filter(({ record }) => record)
+        .map((entry) => {
+          const time = resetCompletionTime(entry.record)?.value;
+          const timestamp = Date.parse(time || '');
+          const hasTime = Number.isFinite(timestamp);
+          return { ...entry, at: hasTime ? time : null, timestamp: hasTime ? timestamp : -Infinity };
         })
-        .sort((left, right) => {
-          const leftAt = Number.isFinite(left.at) ? left.at : -Infinity;
-          const rightAt = Number.isFinite(right.at) ? right.at : -Infinity;
-          return rightAt - leftAt || left.index - right.index;
-        })[0].record;
+        .sort((left, right) => right.timestamp - left.timestamp);
     }
 
     function fmtTiboTime(iso, localeId) {
@@ -443,21 +548,50 @@ window.__ModuleLoader__.load({
     let resetNoticeKeys = [];
     let resetNoticeReady = false;
 
-    /** Unique event identities, independent of which status slot contains them. */
-    function todayCompletionKeys(data, now) {
+    /**
+     * Unique completion events for the browser-local day, independent of which
+     * status slot contains them. A joint event that occupies both slots yields
+     * one event; two different types completing on the same day yield separate
+     * events. Each event carries its reset type for the notification text.
+     */
+    function todayCompletionEvents(data, now) {
       if (resetHappenedToday(data, now) !== true) return [];
       const timeZone = resolveSummaryTimeZone(data.timeZone);
       const currentAt = Number.isFinite(now) ? now : Date.parse(data.currentTime || '');
       const today = dateKeyAt(currentAt, timeZone);
-      return Array.from(new Set([data.latestGlobal, data.latestBanked]
-        .filter((record) => record && (!record.kind || record.kind === 'reset_completed'))
-        .map((record) => {
-          const time = resetCompletionTime(record);
-          const at = time && Date.parse(time.value);
-          if (!Number.isFinite(at) || at > currentAt || dateKeyAt(at, timeZone) !== today) return null;
-          return record.id ? 'id:' + record.id : 'time:' + record.resetType + ':' + time.value;
-        })
-        .filter(Boolean)));
+      const events = [];
+      const seenKeys = new Set();
+      for (const record of [data.latestGlobal, data.latestBanked]) {
+        if (!record || (record.kind && record.kind !== 'reset_completed')) continue;
+        const time = resetCompletionTime(record);
+        const at = time && Date.parse(time.value);
+        if (!Number.isFinite(at) || at > currentAt || dateKeyAt(at, timeZone) !== today) continue;
+        const key = record.id ? 'id:' + record.id : 'time:' + record.resetType + ':' + time.value;
+        if (seenKeys.has(key)) continue;
+        seenKeys.add(key);
+        events.push({ key, type: resetTypeOf(record) || 'unknown' });
+      }
+      return events;
+    }
+
+    /** Kept for compatibility: the dedup identities behind today's events. */
+    function todayCompletionKeys(data, now) {
+      return todayCompletionEvents(data, now).map((event) => event.key);
+    }
+
+    /** Combined type label for freshly observed events, unknown kept explicit. */
+    function resetNoticeTypeLabel(events, dictionary) {
+      const types = new Set(events.map((event) => event.type));
+      const segments = [];
+      if (types.has('global_and_banked') || (types.has('global') && types.has('banked'))) {
+        segments.push('typeGlobalBanked');
+      } else {
+        if (types.has('global')) segments.push('typeGlobal');
+        if (types.has('banked')) segments.push('typeBanked');
+      }
+      if (types.has('unknown')) segments.push('typeUnknown');
+      if (!segments.length) segments.push('typeUnknown');
+      return segments.map((key) => dictionary[key]).join(' + ');
     }
 
     function normalizeResetNoticeKeys(keys) {
@@ -489,14 +623,17 @@ window.__ModuleLoader__.load({
       return Notification.permission || 'default';
     }
 
-    function resetNoticeText() {
-      return isZh(requestedLang) ? zh['notifyReset'] : en['notifyReset'];
+    function resetNoticeText(events) {
+      const dictionary = isZh(requestedLang) ? zh : en;
+      const base = dictionary['notifyReset'];
+      if (!events || !events.length) return base;
+      return dictionary['notifyResetTyped'].replace('{type}', resetNoticeTypeLabel(events, dictionary));
     }
 
-    function showSystemResetNotice() {
+    function showSystemResetNotice(events) {
       if (notificationPermission() !== 'granted') return;
       try {
-        const notice = new Notification(resetNoticeText(), { tag: 'codex-reset-completed' });
+        const notice = new Notification(resetNoticeText(events), { tag: 'codex-reset-completed' });
         notice.onclick = () => {
           try {
             window.focus();
@@ -516,16 +653,16 @@ window.__ModuleLoader__.load({
 
     /** Refresh shared seen IDs for every decision; serialize concurrent pages when supported. */
     async function observeResetCompletion(data) {
-      const current = todayCompletionKeys(data, Date.now());
+      const current = todayCompletionEvents(data, Date.now());
       const update = () => {
         const stored = readStoredResetNotices();
         const seen = new Set([...resetNoticeKeys, ...(stored || [])]);
         const baseline = !resetNoticeReady && stored === undefined;
-        const fresh = current.some((key) => !seen.has(key));
+        const fresh = current.filter((event) => !seen.has(event.key));
         resetNoticeReady = true;
-        resetNoticeKeys = normalizeResetNoticeKeys([...seen, ...current]);
+        resetNoticeKeys = normalizeResetNoticeKeys([...seen, ...current.map((event) => event.key)]);
         writeStoredResetNotices(resetNoticeKeys);
-        if (!baseline && fresh) showSystemResetNotice();
+        if (!baseline && fresh.length) showSystemResetNotice(fresh);
       };
       const locks = typeof navigator !== 'undefined' && navigator.locks;
       if (locks && typeof locks.request === 'function') {
@@ -562,12 +699,12 @@ window.__ModuleLoader__.load({
       const settled = permission === 'granted' || permission === 'denied';
       return h('button', {
         type: 'button',
-        className: 'dcr-notify-toggle',
+        className: 'dcr-notify-toggle' + (permission === 'granted' ? ' is-on' : ''),
         onClick: settled ? undefined : () => requestNotificationPermission(props.onPermission || (() => {})),
         disabled: settled,
         title: label,
         'aria-label': label,
-      }, label);
+      }, h(IconBell, { size: 16 }));
     }
 
     function ensureStatus(lang, force) {
@@ -729,9 +866,35 @@ window.__ModuleLoader__.load({
       );
     }
 
+    function IconBell({ size }) {
+      return h('svg', { viewBox: '0 0 24 24', width: size || 16, height: size || 16, ...strokeProps },
+        h('path', { d: 'M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4' }));
+    }
+
+    function ScopeMark({ type, t, size = 16 }) {
+      const glyph = (kind) => h('svg', { viewBox: '0 0 24 24', width: size, height: size, ...strokeProps, 'aria-hidden': true },
+        ...(kind === 'global' ? [
+          h('circle', { cx: 12, cy: 12, r: 8.5 }),
+          h('ellipse', { cx: 12, cy: 12, rx: 3.7, ry: 8.5 }),
+          h('path', { d: 'M3.5 12h17' }),
+        ] : kind === 'banked' ? [
+          h('rect', { x: 3.5, y: 5.5, width: 17, height: 13, rx: 2.5 }),
+          h('path', { d: 'M3.5 9.5h17M8 14h3M16 12v4m-2-2h4' }),
+        ] : [h('circle', { cx: 12, cy: 12, r: 8.5 }), h('path', { d: 'M9.5 9a2.5 2.5 0 1 1 4 2c-1.5 1-1.5 1.5-1.5 2M12 16h.01' })]));
+      return h('span', {
+        className: 'dcr-scope-mark is-' + type,
+        'data-reset-type': type,
+        role: 'img',
+        title: t(resetTypeLabelKey(type)),
+        'aria-label': t(resetTypeLabelKey(type)),
+      }, ...(type === 'global_and_banked'
+        ? [h('span', { className: 'is-global' }, glyph('global')), h('span', { className: 'is-banked' }, glyph('banked'))]
+        : [glyph(type)]));
+    }
+
     const CSS = `
-.dcr-dock{position:relative;display:inline-grid;flex:0 0 auto;align-items:center;min-width:0;color:var(--dsw-alias-label-primary);font:inherit}
-.dcr-dock-button,.dcr-dock-sizer{grid-area:1/1;position:relative;display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:3px 8px;border:0;box-sizing:border-box;font:inherit;font-size:12px;font-weight:550;white-space:nowrap}
+.dcr-dock{position:relative;display:inline-grid;flex:0 1 auto;align-items:center;min-width:0;max-width:100%;overflow:hidden;color:var(--dsw-alias-label-primary);font:inherit}
+.dcr-dock-button,.dcr-dock-sizer{grid-area:1/1;position:relative;display:inline-flex;align-items:center;gap:6px;min-height:28px;min-width:0;padding:3px 8px;border:0;box-sizing:border-box;font:inherit;font-size:12px;font-weight:550;white-space:nowrap}
 .dcr-dock-button{justify-self:start;width:max-content;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;transition:background .14s ease}
 .dcr-dock-sizer{visibility:hidden;pointer-events:none;font-weight:650}
 .dcr-dock-label-sizer{display:inline-grid}
@@ -743,7 +906,7 @@ body[data-ds-dark-theme] .dcr-chip-probability{color:#a78bfa}
 .dcr-dock-button:focus-visible,.dcr-panel-icon-button:focus-visible,.dcr-refresh-action:focus-visible,.dcr-btn:focus-visible,.dcr-external-link:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px}
 .dcr-external-link:focus-visible{text-decoration:underline}
 .dcr-dock-glyph{display:inline-flex;align-items:center;justify-content:center;flex:none;color:var(--dsw-alias-state-business-primary)}
-.dcr-card{position:fixed;z-index:2147483000;box-sizing:border-box;display:flex;flex-direction:column;gap:0;width:min(380px,calc(100vw - 24px));max-height:min(540px,calc(100dvh - 16px));overflow:auto;overscroll-behavior:contain;padding:16px;border:1px solid var(--dsw-alias-border-l1);border-radius:20px;background:var(--dsw-alias-bg-base,var(--dsw-alias-bg-layer-1));color:var(--dsw-alias-label-primary);--dsw-elevation-stroke-color:var(--dsw-alias-border-l1);box-shadow:var(--dsw-elevation-prominent,0 8px 28px rgba(9,12,24,.18));font:inherit;animation:dcr-in .16s cubic-bezier(.23,1,.32,1) both}
+.dcr-card{position:fixed;z-index:2147483000;box-sizing:border-box;display:flex;flex-direction:column;gap:0;width:min(340px,calc(100vw - 24px));max-height:min(540px,calc(100dvh - 16px));overflow:auto;overscroll-behavior:contain;padding:18px;border:0;border-radius:16px;background:var(--dsw-alias-bg-base,var(--dsw-alias-bg-layer-1));color:var(--dsw-alias-label-primary);--dsw-elevation-stroke-color:var(--dsw-alias-border-l1);box-shadow:var(--dsw-elevation-prominent,0 8px 28px rgba(9,12,24,.18));font:inherit;animation:dcr-in .16s cubic-bezier(.23,1,.32,1) both}
 @keyframes dcr-in{from{opacity:0;transform:translateY(4px) scale(.99)}to{opacity:1;transform:translateY(0) scale(1)}}
 .dcr-head{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0}
 .dcr-title-group{display:flex;align-items:center;gap:8px;min-width:0}
@@ -761,59 +924,61 @@ body[data-ds-dark-theme] .dcr-chip-probability{color:#a78bfa}
 .dcr-refresh-action{position:relative;display:inline-flex;flex:none;align-items:center;justify-content:center;box-sizing:border-box;width:32px;height:32px;min-width:32px;min-height:32px;padding:0;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;cursor:pointer}
 .dcr-refresh-action:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}
 .dcr-refresh-action:disabled{opacity:.58;cursor:default}
-.dcr-notify-toggle{display:inline-flex;flex:none;align-items:center;min-width:0;max-width:11em;margin-right:4px;padding:0 8px;min-height:32px;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dcr-notify-toggle{display:inline-flex;align-items:center;justify-content:center;flex:none;width:30px;height:30px;padding:0;border:0;border-radius:7px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer}
 .dcr-notify-toggle:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}
-.dcr-notify-toggle:disabled{opacity:.58;cursor:default}
+.dcr-notify-toggle.is-on{color:var(--dsw-alias-state-business-primary)}
+.dcr-notify-toggle:disabled{cursor:default}
+.dcr-notify-toggle:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px}
 .dcr-spin{animation:dcr-rot .8s linear infinite}
 @keyframes dcr-rot{to{transform:rotate(360deg)}}
-.dcr-status-line{box-sizing:border-box;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);align-items:stretch;gap:16px;width:100%;min-width:0;margin-top:12px;padding:16px;border-radius:12px;background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 6%,var(--dsw-alias-bg-base));color:var(--dsw-alias-label-primary);line-height:1.4;text-align:left}
-.dcr-summary-today{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:8px;min-width:0}
-.dcr-summary-question{color:var(--dsw-alias-label-secondary);font-size:13px;font-weight:500;line-height:1.4;overflow-wrap:anywhere}
-.dcr-summary-answer{color:var(--dsw-alias-state-business-primary);font-size:32px;font-weight:650;line-height:1;letter-spacing:-.025em}
-.dcr-summary-answer.has-probability{font-size:24px;line-height:1.25;overflow-wrap:anywhere}
-.dcr-summary-answer.is-unknown{font-size:20px;line-height:1.25;letter-spacing:0}
-.dcr-summary-details{display:flex;flex-direction:column;justify-content:center;gap:10px;min-width:0;padding-left:16px;border-left:1px solid var(--dsw-alias-border-l1)}
-.dcr-summary-item{display:flex;flex-direction:column;gap:4px;min-width:0}
-.dcr-summary-label{color:var(--dsw-alias-label-secondary);font-size:12px;font-weight:500;line-height:1.35}
-.dcr-summary-next-label{font-weight:700}
-.dcr-summary-value{color:var(--dsw-alias-label-primary);font-size:15px;font-weight:600;line-height:1.35;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
-.dcr-summary-subvalue{color:var(--dsw-alias-label-secondary);font-size:12px;font-weight:400;line-height:1.35;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
-.dcr-summary-latest .dcr-summary-label{font-size:11px}
-.dcr-summary-latest .dcr-summary-value{font-size:14px;font-weight:400}
-.dcr-summary-latest .dcr-summary-subvalue{font-size:11px}
-.dcr-freshness{margin:10px 0 0;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:1.5;overflow-wrap:anywhere}
-.dcr-summary-meta{color:var(--dsw-alias-label-secondary);font-size:12px;font-weight:400;line-height:1.35}
-.dcr-tibo-post{box-sizing:border-box;width:100%;min-width:0;margin-top:16px}
-.dcr-tibo-head{display:grid;grid-template-columns:32px minmax(0,1fr);align-items:start;gap:12px;min-width:0}
-.dcr-tibo-avatar{display:block;flex:none;width:32px;height:32px;border-radius:50%;object-fit:cover}
-.dcr-tibo-main{flex:1;min-width:0}
-.dcr-tibo-author{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:4px 8px;min-width:0;color:var(--dsw-alias-label-secondary);font-size:14px;font-weight:400;line-height:20px}
-.dcr-tibo-identity{display:inline-flex;align-items:baseline;flex-wrap:wrap;gap:0 6px;min-width:0}
-.dcr-tibo-name{color:var(--dsw-alias-label-primary);font-weight:600}
-.dcr-tibo-handle{color:var(--dsw-alias-label-secondary);font-size:12px;font-weight:400;line-height:18px}
-.dcr-tibo-time{display:block;margin-top:4px;color:var(--dsw-alias-label-secondary);font-size:12px;font-weight:400;line-height:18px;font-variant-numeric:tabular-nums}
-.dcr-visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
-.dcr-tibo-link{flex:none;align-self:center;white-space:nowrap}
+.dcr-status-line{box-sizing:border-box;width:100%;min-width:0;margin-top:20px;color:var(--dsw-alias-label-primary);line-height:1.4;text-align:left}
+.dcr-forecast{min-width:0}
+.dcr-reset-heading{display:flex;align-items:center;flex-wrap:wrap;gap:2px 12px;margin:0;color:var(--dsw-alias-label-secondary);font-size:13px;font-weight:500}
+.dcr-reset-state{color:var(--dsw-alias-label-primary);font-size:38px;font-weight:700;line-height:1.15;letter-spacing:-.02em}
+.dcr-reset-state[data-reset-state=todayYes]{color:var(--dsw-alias-state-business-primary)}
+.dcr-reset-outlook{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 6px;margin-top:12px;color:var(--dsw-alias-label-secondary);font-size:13px;line-height:1.6}
+.dcr-forecast-time{font-variant-numeric:tabular-nums}
+.dcr-forecast-probability{color:#6d28d9;font-size:13px;font-weight:600;font-variant-numeric:tabular-nums}
+body[data-ds-dark-theme] .dcr-forecast-probability{color:#c4b5fd}
+.dcr-scope-mark,.dcr-scope-mark>span{display:inline-flex;align-items:center;justify-content:center;flex:none;gap:3px}
+.dcr-scope-mark.is-global,.dcr-scope-mark .is-global{color:#2563eb}
+.dcr-scope-mark.is-banked,.dcr-scope-mark .is-banked{color:#a86608}
+.dcr-scope-mark.is-unknown{color:var(--dsw-alias-label-secondary)}
+body[data-ds-dark-theme] .dcr-scope-mark.is-global,body[data-ds-dark-theme] .dcr-scope-mark .is-global{color:#89b4ff}
+body[data-ds-dark-theme] .dcr-scope-mark.is-banked,body[data-ds-dark-theme] .dcr-scope-mark .is-banked{color:#efbd64}
+.dcr-recent{margin-top:16px;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l1)}
+.dcr-recent-title{margin:0 0 4px;color:var(--dsw-alias-label-secondary);font-size:12px;font-weight:400}
+.dcr-summary-latest{display:flex;align-items:center;gap:8px;min-height:30px;min-width:0}
+.dcr-recent-kind{flex:1;min-width:0;font-size:13px;color:var(--dsw-alias-label-primary)}
+.dcr-summary-value{color:var(--dsw-alias-label-primary);font-size:13px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.dcr-summary-subvalue{color:var(--dsw-alias-label-secondary);font-size:12px;min-width:44px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.dcr-freshness{margin:0;color:var(--dsw-alias-label-secondary);font-size:11px;line-height:1.5}
+.dcr-tibo-post{min-width:0;margin-top:18px}
+.dcr-tibo-avatar{display:block;flex:none;width:20px;height:20px;border-radius:50%;object-fit:cover}
+.dcr-post-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:0 12px;min-width:0}
+.dcr-post-byline{display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px;min-width:0}
+.dcr-post-language{flex:none;min-width:62px;min-height:32px;margin-inline-start:auto;padding:3px 8px;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-state-business-primary);font:inherit;font-size:12px;font-weight:500;cursor:pointer}
+.dcr-post-language:hover{background:var(--dsw-alias-bg-layer-2)}
+.dcr-post-language:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px}
+
+.dcr-tibo-time{display:block;color:var(--dsw-alias-label-secondary);font-size:12px;font-variant-numeric:tabular-nums}
 .dcr-external-link{display:inline-flex;align-items:center;justify-content:center;gap:.35em;min-height:24px;color:color-mix(in srgb,var(--dsw-alias-state-business-primary) 70%,var(--dsw-alias-label-primary));font-size:13px;font-weight:500;text-decoration:none;text-underline-offset:.2em;white-space:nowrap;transition:color .14s ease,text-decoration-thickness .14s ease}
 .dcr-external-link:hover{color:var(--dsw-alias-label-primary);text-decoration:underline;text-decoration-thickness:.12em}
-.dcr-tibo-copy{display:flex;flex-direction:column;gap:5px;min-width:0;margin-top:10px}
-.dcr-tibo-text{display:-webkit-box;margin:0;color:var(--dsw-alias-label-primary);font-size:16px;font-weight:400;line-height:24px;white-space:pre-line;overflow-wrap:anywhere;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:4}
-.dcr-tibo-text.is-original{color:var(--dsw-alias-label-secondary);font-size:14px;line-height:20px}
+.dcr-post-author.dcr-external-link{gap:6px;color:var(--dsw-alias-label-primary);font-weight:600}
+.dcr-tibo-text{margin:8px 0 0;color:var(--dsw-alias-label-primary);font-size:14px;font-weight:400;line-height:21px;white-space:pre-line;overflow-wrap:anywhere}
 .dcr-error{display:flex;align-items:flex-start;gap:8px;padding:9px 10px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 7%,var(--dsw-alias-bg-layer-1))}
 .dcr-error-icon{flex:none;margin-top:1px;color:var(--dsw-alias-state-warn-primary)}
 .dcr-error-main{flex:1;min-width:0}
 .dcr-error-title{color:var(--dsw-alias-label-primary);font-size:.875em;font-weight:500;line-height:1.4}
 .dcr-error-text{margin-top:.2em;color:var(--dsw-alias-label-secondary);font-size:.8125em;line-height:1.45;overflow-wrap:anywhere}
 .dcr-error .dcr-btn{width:auto;min-width:36px;height:32px;padding:0 10px;font-size:.8125em;white-space:nowrap}
-.dcr-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;min-width:0;margin-top:16px;padding-top:8px;border-top:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}
+.dcr-foot{position:sticky;bottom:0;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;gap:12px;min-width:0;margin-top:12px;padding-top:10px;border-top:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base,var(--dsw-alias-bg-layer-1));color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}
+.dcr-foot-tools .dcr-source-link{width:30px;height:30px;min-height:30px}
 .dcr-foot-tools{display:inline-flex;align-items:center;justify-content:flex-end;gap:0;min-width:0}
 .dcr-source-link,.dcr-source-action{min-height:24px}
 @media(max-width:420px){
-  .dcr-card{width:min(380px,calc(100vw - 16px))}
-  .dcr-status-line{gap:12px;padding:12px}
-  .dcr-summary-details{padding-left:12px}
-  .dcr-summary-answer{font-size:30px}
-  .dcr-summary-answer.is-unknown{font-size:18px}
+  .dcr-card{width:min(340px,calc(100vw - 16px));padding:16px}
+  .dcr-summary-subvalue{min-width:42px}
 }
 @media(pointer:coarse){
   .dcr-dock-button,.dcr-dock-sizer,.dcr-panel-icon-button{min-width:44px;min-height:44px}
@@ -832,11 +997,7 @@ body[data-ds-dark-theme] .dcr-chip-probability{color:#a78bfa}
     }
 
     function resetScopeLabel(record, t) {
-      if (!record) return t('typeUnknown');
-      if (record.resetType === 'global') return t('typeGlobal');
-      if (record.resetType === 'banked') return t('typeBanked');
-      if (record.resetType === 'global_and_banked') return t('typeGlobalBanked');
-      return t('typeUnknown');
+      return t(resetTypeLabelKey(record ? resetTypeOf(record) : null));
     }
 
     function fmtScheduleAbs(iso, localeId, precision) {
@@ -865,74 +1026,81 @@ body[data-ds-dark-theme] .dcr-chip-probability{color:#a78bfa}
       return sameDay(target, tomorrow) ? t('scheduleTomorrow') : '';
     }
 
-    function ResetSummary({ data, t, localeId, now }) {
-      const latest = latestResetRecord(data);
-      const latestTime = resetCompletionTime(latest);
-      const latestAt = latestTime && Number.isFinite(Date.parse(latestTime.value))
-        ? latestTime.value
-        : null;
-      const verdict = reportedVerdict(data, now);
-      const question = t(verdict.questionKey);
-      const next = data && data.nextScheduled ? data.nextScheduled : null;
-      const scheduleWindow = next && next.scheduleWindow;
-      const nextTarget = scheduleWindow && (scheduleWindow.startAt || scheduleWindow.endAt)
-        ? scheduleWindow.startAt || scheduleWindow.endAt
-        : next && next.effectiveAt;
-      const nextAt = nextTarget && Number.isFinite(Date.parse(nextTarget))
-        ? nextTarget
-        : null;
-      const probability = verdict.percent === null ? ''
-        : (verdict.percent === 100 ? '' : '≥') + verdict.percent + '%';
-      const todayAnswer = [probability, t(verdict.answerKey)].filter(Boolean).join(' ');
-      const latestDisplay = latestAt ? fmtAbsCompact(latestAt, localeId) : latest ? t('noTime') : t('noResetSummary');
-      const latestRelative = latestAt ? fmtRel(latestAt, t, now) : '';
-      const latestTimeTitle = latestAt
-        ? latestTime.field === 'announcedAt'
-          ? t('completionAnnouncementTime', { time: fmtAbsExact(latestAt, localeId) })
-          : fmtAbsExact(latestAt, localeId)
-        : undefined;
-      const nextDisplay = nextAt
-        ? [fmtScheduleAbs(nextAt, localeId, next.schedulePrecision), scheduleDaySuffix(nextAt, now, t)].filter(Boolean).join(' ')
-        : next
-          ? t('scheduleUnknown')
-          : t('noSchedule');
-      const nextTimeTitle = nextAt
-        ? [
-            t('scheduledAt', { time: fmtScheduleAbs(nextAt, localeId, next.schedulePrecision) }),
-            next.schedulePrecision === 'date' ? t('precisionDate') : '',
-          ].filter(Boolean).join(' · ')
-        : undefined;
+    function fmtClock(iso, localeId) {
+      return new Intl.DateTimeFormat(intlLocaleOf(localeId), { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso));
+    }
 
-      return h(
-        'section',
-        {
-          className: 'dcr-status-line',
-          'aria-label': [question, todayAnswer, t('nextScheduleLabel'), nextDisplay, t('latestReset'), latestDisplay].join(' · '),
-        },
-        h('div', { className: 'dcr-summary-today' },
-          h('span', { className: 'dcr-summary-question' }, question),
-          h('strong', { className: 'dcr-summary-answer' + (verdict.answerKey === 'todayUnknown' ? ' is-unknown' : probability ? ' has-probability' : '') }, todayAnswer),
-          verdict.scheduled ? h('span', { className: 'dcr-summary-meta' }, t('scheduledReport')) : null,
-        ),
-        h('div', { className: 'dcr-summary-details' },
-          h('div', { className: 'dcr-summary-item' },
-            h('strong', { className: 'dcr-summary-label dcr-summary-next-label' }, t('nextScheduleLabel')),
-            nextAt
-              ? h('time', { className: 'dcr-summary-value', dateTime: nextAt, title: nextTimeTitle }, nextDisplay)
-              : h('span', { className: 'dcr-summary-meta' }, nextDisplay),
+    function fmtScheduleCompact(iso, localeId, precision, now, t) {
+      const day = scheduleDaySuffix(iso, now, t).replace(/[（）()]/g, '') ||
+        new Intl.DateTimeFormat(intlLocaleOf(localeId), { month: 'short', day: 'numeric' }).format(new Date(iso));
+      return precision === 'date' ? day : day + ' ' + fmtClock(iso, localeId);
+    }
+
+    function LatestResetItem({ record, labelKey, at, t, localeId, now }) {
+      const slotType = labelKey === 'latestGlobalLabel' ? 'global' : 'banked';
+      const type = resetTypeOf(record) ? slotType : 'unknown';
+      const title = [t(labelKey), resetScopeLabel(record, t), at ? fmtAbsExact(at, localeId) : ''].filter(Boolean).join(' · ');
+      return h('div', { key: labelKey, className: 'dcr-summary-latest', title, 'aria-label': title },
+        ScopeMark({ type, t, size: 15 }),
+        h('span', { className: 'dcr-recent-kind' }, t(type === 'unknown' ? 'typeUnknown' : slotType === 'global' ? 'compactGlobal' : 'compactBanked')),
+        at ? h('time', { className: 'dcr-summary-value', dateTime: at, title }, fmtAbsCompact(at, localeId))
+          : h('span', { className: 'dcr-summary-value' }, t('noTime')),
+        at ? h('span', { className: 'dcr-summary-subvalue' }, fmtRel(at, t, now)) : null,
+      );
+    }
+
+    function compactTypeLabel(type, t) {
+      if (type === 'global') return t('compactGlobal');
+      if (type === 'banked') return t('compactBanked');
+      if (type === 'global_and_banked') return t('compactGlobal') + ' / ' + t('compactBanked');
+      return t('typeUnknown');
+    }
+
+    function ResetSummary({ data, t, localeId, now }) {
+      const verdict = reportedVerdict(data, now);
+      const answerKey = completionAnswerKey(verdict.completed);
+      const unknown = answerKey === 'todayUnknown';
+      const answerLabel = t('todayQuestion') + ' ' + t(answerKey);
+      const next = data && data.nextScheduled;
+      const window = next && next.scheduleWindow;
+      const target = window && (window.startAt || window.endAt) || next && next.effectiveAt;
+      const nextAt = target && Number.isFinite(Date.parse(target)) ? target : null;
+      const probability = verdict.percent === null ? '' : (verdict.percent === 100 ? '' : '≥') + verdict.percent + '%';
+      const nextText = nextAt ? fmtScheduleCompact(nextAt, localeId, next.schedulePrecision, now, t) : next ? t('scheduleUnknown') : t('noSchedule');
+      const expiresAt = Date.parse(window && (window.endAt || window.startAt) || next && next.effectiveAt || '');
+      const currentAt = Number.isFinite(now) ? now : Date.parse(data && data.currentTime || '');
+      const hasUpcoming = next && next.kind === 'reset_scheduled' && (!next.scheduleState || next.scheduleState === 'pending') &&
+        (!Number.isFinite(expiresAt) || expiresAt >= currentAt);
+      const accessible = [answerLabel,
+        ...completedTypeLabelKeys(verdict.completed).map((key) => t(key)),
+        ...(verdict.scheduled ? [t(verdict.questionKey), probability, t(verdict.answerKey)] : []),
+        next ? t('nextScheduleLabel') + ' · ' + resetScopeLabel(next, t) + ' · ' + nextText : '',
+      ].filter(Boolean).join(' · ');
+      return h('section', { className: 'dcr-status-line', 'aria-label': accessible },
+        h('div', { className: 'dcr-forecast' },
+          h('h3', { className: 'dcr-reset-heading', 'aria-label': unknown ? answerLabel : undefined },
+            h('span', null, t('todayQuestion')),
+            h('strong', { className: 'dcr-reset-state', 'data-reset-state': answerKey, title: unknown ? t(answerKey) : undefined },
+              unknown ? '—' : t(answerKey)),
           ),
-          h('div', { className: 'dcr-summary-item dcr-summary-latest' },
-            h('span', { className: 'dcr-summary-label' }, t('latestReset')),
-            latestAt
-              ? h('time', { className: 'dcr-summary-value', dateTime: latestAt, title: latestTimeTitle }, latestDisplay)
-              : h('span', { className: 'dcr-summary-value' }, latestDisplay),
-            latestRelative
-              ? h('span', { className: 'dcr-summary-subvalue' }, latestRelative)
-              : latest
-                ? h('span', { className: 'dcr-summary-subvalue' }, resetScopeLabel(latest, t))
-                : null,
+          h('div', { className: 'dcr-reset-outlook' },
+            hasUpcoming ? [
+              h('span', { key: 'scope' }, compactTypeLabel(resetTypeOf(next), t) + ' · ' + t('expectedShort')),
+              nextAt ? h('time', { key: 'time', className: 'dcr-forecast-time', dateTime: nextAt, title: fmtScheduleAbs(nextAt, localeId, next.schedulePrecision) }, nextText)
+                : h('span', { key: 'time' }, nextText),
+              probability ? h('span', { key: 'probability', className: 'dcr-forecast-probability' }, '· ' + probability) : null,
+            ] : h('span', null, t('noSchedule')),
           ),
         ),
+      );
+    }
+
+    function ResetHistory({ data, t, localeId, now }) {
+      const entries = recentResetEntries(data);
+      if (!entries.length) return null;
+      return h('section', { className: 'dcr-recent', 'aria-label': t('compactRecent') },
+        h('h3', { className: 'dcr-recent-title' }, t('compactRecent')),
+        ...entries.map((entry) => LatestResetItem({ ...entry, t, localeId, now })),
       );
     }
 
@@ -1015,90 +1183,35 @@ body[data-ds-dark-theme] .dcr-chip-probability{color:#a78bfa}
       return [];
     }
 
-    function resetSummaryTimestamp(data) {
-      const next = data && data.nextScheduled ? data.nextScheduled : null;
-      if (next) {
-        const scheduleWindow = next.scheduleWindow;
-        const target = scheduleWindow && (scheduleWindow.startAt || scheduleWindow.endAt)
-          ? scheduleWindow.startAt || scheduleWindow.endAt
-          : next.effectiveAt;
-        return target && Number.isFinite(Date.parse(target)) ? target : null;
-      }
-      const latest = resetCompletionTime(latestResetRecord(data));
-      return latest ? latest.value : null;
+    function selectedPostPart(parts, preferredLanguage) {
+      return parts.find((part) => part.lang === preferredLanguage) || parts[0] || null;
     }
 
-    function TiboPost({ data, summaryTimeIso, localeId, t }) {
+    function TiboPost({ data, localeId, t, preferredLanguage, onLanguageChange }) {
       const item = latestTiboPost(data);
       if (!item) return null;
       const textParts = tiboPostTextParts(item.record, item.translationLang);
-      if (!textParts.length) return null;
+      const part = selectedPostPart(textParts, preferredLanguage || (isZh(localeId) ? TIBO_TRANSLATION_LANG : 'en'));
+      if (!part) return null;
+      const alternate = textParts.find((candidate) => candidate.lang !== part.lang);
       const postIso = item.record.announcedAt || item.record.completedAt || item.record.effectiveAt || '';
-      const postTime = fmtTiboTime(postIso, localeId);
-      const postAt = Date.parse(postIso);
-      const summaryAt = Date.parse(summaryTimeIso || '');
-      const repeatsSummaryTime = Number.isFinite(postAt) && Number.isFinite(summaryAt) && postAt === summaryAt;
-      return h(
-        'article',
-        { className: 'dcr-tibo-post', 'aria-label': 'Tibo @thsottiaux' },
-        h(
-          'div',
-          { className: 'dcr-tibo-head' },
-          h(
-            'img',
-            {
-              className: 'dcr-tibo-avatar',
-              src: TIBO_AVATAR_DATA_URI,
-              alt: '',
-              'aria-hidden': true,
-              width: 32,
-              height: 32,
-              decoding: 'async',
-            },
+      return h('article', { className: 'dcr-tibo-post', 'aria-label': 'Tibo · ' + t('sourcePost') },
+        h('div', { className: 'dcr-post-toolbar' },
+          h('div', { className: 'dcr-post-byline' },
+            h('a', { className: 'dcr-post-author dcr-external-link', href: item.url, target: '_blank', rel: 'noopener noreferrer', title: t('openTiboPost'), 'aria-label': t('openTiboPost') },
+              h('img', { className: 'dcr-tibo-avatar', src: TIBO_AVATAR_DATA_URI, alt: '', width: 20, height: 20 }),
+              'Tibo'),
+            postIso ? h('time', { className: 'dcr-tibo-time', dateTime: postIso }, fmtTiboTime(postIso, localeId)) : null,
           ),
-          h('div', { className: 'dcr-tibo-main' },
-            h(
-              'div',
-              { className: 'dcr-tibo-author' },
-              h('div', { className: 'dcr-tibo-identity' },
-                h('span', { className: 'dcr-tibo-name' }, 'Tibo'),
-                h('span', { className: 'dcr-tibo-handle' }, '@thsottiaux'),
-              ),
-              h(
-                'a',
-                {
-                  className: 'dcr-tibo-link dcr-source-action dcr-external-link',
-                  href: item.url,
-                  target: '_blank',
-                  rel: 'noopener noreferrer',
-                  title: t('openTiboPost'),
-                  'aria-label': t('openTiboPost'),
-                },
-                t('viewOriginal'),
-                h(IconLink, { size: 12 }),
-              ),
-            ),
-            postTime
-              ? h('time', {
-                  className: 'dcr-tibo-time' + (repeatsSummaryTime ? ' dcr-visually-hidden' : ''),
-                  dateTime: postIso,
-                  title: fmtAbs(postIso, localeId),
-                }, postTime)
-              : null,
-          ),
+          alternate ? h('button', {
+            type: 'button', className: 'dcr-post-language', lang: alternate.lang,
+            onClick: () => onLanguageChange?.(alternate.lang),
+          }, alternate.lang === TIBO_TRANSLATION_LANG ? '中文' : 'English') : null,
         ),
-        h('div', { className: 'dcr-tibo-copy' },
-          ...textParts.map((part) => h(
-            'p',
-            {
-              className: 'dcr-tibo-text' + (part.original ? ' is-original' : ''),
-              lang: part.lang,
-            },
-            part.text,
-          )),
-        ),
+        h('p', { className: 'dcr-tibo-text', lang: part.lang, 'aria-live': 'polite' }, part.text),
       );
     }
+
 
     function ErrorBox({ status, t, onRetry, now }) {
       const error = status.error;
@@ -1145,13 +1258,14 @@ body[data-ds-dark-theme] .dcr-chip-probability{color:#a78bfa}
       const [now, setNow] = useState(() => Date.now());
       const [position, setPosition] = useState(null);
       const [noticePermission, setNoticePermission] = useState(notificationPermission);
+      const [postLanguage, setPostLanguage] = useState(() => isZh(localeId) ? TIBO_TRANSLATION_LANG : 'en');
+      useEffect(() => setPostLanguage(isZh(localeId) ? TIBO_TRANSLATION_LANG : 'en'), [localeId]);
       const triggerRef = useRef(null);
       const panelRef = useRef(null);
       const panelId = useRef('dcr-popover-' + Math.random().toString(36).slice(2));
       const busy = status.phase === 'loading' || status.phase === 'refreshing';
       const data = status.entry ? status.entry.data : null;
       const fetchedAt = status.entry ? status.entry.at : null;
-      const summaryTimeIso = resetSummaryTimestamp(data);
       const dockAccessibleLabel = t('statusOf');
       // Closed docks do not run the popover's one-second clock. Use the current
       // render time so each poll also reevaluates expiry and local-day priority.
@@ -1160,6 +1274,9 @@ body[data-ds-dark-theme] .dcr-chip-probability{color:#a78bfa}
         ? verdict.percent : null;
       const chipProbability = chipPercent === null ? ''
         : (chipPercent === 100 ? '' : '≥') + chipPercent + '%';
+      // The high-probability forecast names its reset type; an unknown schedule
+      // type is stated as unknown instead of defaulting to global.
+      const chipTypeLabel = chipProbability ? t(resetTypeLabelKey(verdict.type)) : null;
       const refreshTitle = fetchedAt
         ? t('refreshFetched', { time: fmtAbs(new Date(fetchedAt).toISOString(), localeId) })
         : t('refresh');
@@ -1214,7 +1331,7 @@ body[data-ds-dark-theme] .dcr-chip-probability{color:#a78bfa}
           const viewportTop = visualViewport ? visualViewport.offsetTop : 0;
           const viewportWidth = visualViewport ? visualViewport.width : window.innerWidth;
           const viewportHeight = visualViewport ? visualViewport.height : window.innerHeight;
-          const width = Math.max(1, Math.min(380, viewportWidth - (viewportWidth <= 420 ? 16 : 24)));
+          const width = Math.max(1, Math.min(340, viewportWidth - (viewportWidth <= 420 ? 16 : 24)));
           const maxHeight = Math.max(1, Math.min(540, viewportHeight - 16));
           const panelRect = panel.getBoundingClientRect();
           const panelWidth = Math.min(width, panelRect.width || width);
@@ -1280,11 +1397,11 @@ body[data-ds-dark-theme] .dcr-chip-probability{color:#a78bfa}
           // Reserve the current language's widest label outside the button so
           // neighbours stay put while the hover and hit area fit visible text.
           h('span', { className: 'dcr-dock-sizer', 'aria-hidden': true },
-            h('span', { style: { width: 16, flex: 'none' } }),
+            h('span', { style: { width: 35, flex: 'none' } }),
             h('span', { className: 'dcr-dock-label-sizer' },
               h('span', null, t('chipName')),
-              h('span', null, t('chipReset') + ' ≥88%'),
-              h('span', null, t('chipReset') + ' 100%'),
+              h('span', null, t('chipName') + ' ≥88%'),
+              h('span', null, t('chipName') + ' 100%'),
             ),
           ),
           h(
@@ -1293,16 +1410,16 @@ body[data-ds-dark-theme] .dcr-chip-probability{color:#a78bfa}
               ref: triggerRef,
               type: 'button',
               className: 'dcr-dock-button',
-              'aria-label': dockAccessibleLabel,
-              title: dockAccessibleLabel,
+              'aria-label': chipTypeLabel ? [dockAccessibleLabel, chipTypeLabel, chipProbability].join(' · ') : dockAccessibleLabel,
+              title: chipTypeLabel ? dockAccessibleLabel + ' · ' + chipTypeLabel : dockAccessibleLabel,
               'aria-expanded': open,
               'aria-controls': panelId.current,
               onClick: () => setOpen(!open),
             },
-            h('span', { className: 'dcr-dock-glyph', 'aria-hidden': true }, h(ResetGlyph, { size: 16 })),
+            h('span', { className: 'dcr-dock-glyph' }, chipProbability ? ScopeMark({ type: verdict.type, t, size: 15 }) : h(ResetGlyph, { size: 16 })),
             h('span', { className: 'dcr-dock-label' },
               chipProbability
-                ? [t('chipReset') + ' ', h('span', { className: 'dcr-chip-probability', key: 'probability' }, chipProbability)]
+                ? [t('chipName') + ' ', h('span', { className: 'dcr-chip-probability', key: 'probability' }, chipProbability)]
                 : t('chipName'),
             ),
           ),
@@ -1341,34 +1458,23 @@ body[data-ds-dark-theme] .dcr-chip-probability{color:#a78bfa}
                   ? h(ErrorBox, { status, t, onRetry: () => ensureStatus(lang, true), now })
                 : null,
                 h(ResetSummary, { data, t, localeId, now }),
-                h('p', { className: 'dcr-freshness' },
-                  [
-                    t('localTimeZone', { zone: resolveSummaryTimeZone(data && data.timeZone) || Intl.DateTimeFormat().resolvedOptions().timeZone || '-' }),
-                    fetchedAt ? t('fetchedAt', { time: fmtAbsExact(new Date(fetchedAt).toISOString(), localeId) }) : '',
-                  ].filter(Boolean).join(' · '),
-                ),
                 h(TiboPost, {
+                  preferredLanguage: postLanguage,
+                  onLanguageChange: setPostLanguage,
                   data,
-                  summaryTimeIso,
                   localeId,
                   t,
                 }),
+                h(ResetHistory, { data, t, localeId, now }),
                 h(
                   'footer',
                   { className: 'dcr-foot' },
-                  h(
-                    'a',
-                    {
-                      className: 'dcr-source-link dcr-external-link',
-                      href: SITE_URL,
-                      target: '_blank',
-                      rel: 'noopener noreferrer',
-                      title: t('dataSource'),
-                    },
-                    t('dataSource'),
-                    h(IconLink, { size: 12 }),
-                  ),
+                  h('p', { className: 'dcr-freshness', title: [
+                    t('localTimeZone', { zone: resolveSummaryTimeZone(data && data.timeZone) || '-' }),
+                    fetchedAt ? t('fetchedAt', { time: fmtAbsExact(new Date(fetchedAt).toISOString(), localeId) }) : '',
+                  ].filter(Boolean).join(' · ') }, fetchedAt ? t('compactUpdated', { time: fmtClock(fetchedAt, localeId) }) : ''),
                   h('div', { className: 'dcr-foot-tools' },
+                    h('a', { className: 'dcr-source-link dcr-external-link', href: SITE_URL, target: '_blank', rel: 'noopener noreferrer', title: t('dataSource'), 'aria-label': t('dataSource') }, h(IconLink, { size: 15 })),
                     h(NoticePermissionControl, {
                       t,
                       permission: noticePermission,

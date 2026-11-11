@@ -18,12 +18,11 @@ Original reset announcements are from [Tibo Sottiaux (@thsottiaux)](https://x.co
 
 ## What it shows
 
-- The composer entry reports the source site's live schedule probability (for example, **≥86% Yes**), alongside the latest completed reset and next expected time. The heading switches to an upcoming-reset question when a live schedule is available.
-- Schedule confidence comes directly from the public API and is rounded to a percent as on the source page. In the popover, a live schedule displays probability + Yes even below 80% or when its local date is tomorrow. A completion reported today takes priority. Scheduled events remain schedule records and do not replace the latest completed reset. The day check uses the browser's local calendar day; completion times prefer `completedAt`, then `effectiveAt`, then `announcedAt`.
-- The popover includes the Tibo Sottiaux source post. It shows the Simplified Chinese translation and the English source when both differ.
-- The dock entry follows the popover's schedule rules. When no completion has been reported today and a live pending schedule has a rounded probability of at least 80%, its label becomes `Codex Reset ≥86%` (`Codex Reset 100%` at 100%); otherwise it stays `Codex Reset Tracker`. Only the percentage is violet; the name keeps its normal color. The percentage shares the name's font weight and keeps its violet color on hover and when expanded. Normal refreshes keep the last successful, still-valid forecast visible. A failed request restores the default label until a later successful response confirms a valid forecast. Unread markers and unread storage are removed. The entry reserves the widest label in the active language so neighbouring controls stay in place, while the hover background and clickable area fit the visible content.
-- The client requests `/status` on mount and refreshes every 10 minutes. Opening the popover, returning to the foreground, or reconnecting checks for updates when the snapshot is at least 60 seconds old. Requests time out after 20 seconds and respect rate-limit cooldowns. The popover displays the local time zone and fetch time; fetch time is not the upstream monitor time. The agent tool can query status or paginated records.
-- When today's reset answer turns from no to yes, the client raises one system notification saying `Codex has reset` (`Codex 已经重置` in Chinese). Notifications need browser permission: the popover footer offers Enable notifications, and only that click asks for it; a denial or an unsupported browser simply sends nothing. Recent completion IDs are deduplicated across status slots and kept in local storage so a reload stays quiet; browsers supporting Web Locks also coordinate concurrent pages. Without that coordination, cross-page deduplication is best effort. A blocked storage API deduplicates only within the current page, and the first load only records a baseline instead of replaying history. Detection rides the polling above, so it can lag by up to one refresh interval.
+- The composer stays compact: `Codex ≥86%`. A blue globe identifies Global resets, an amber card identifies Banked resets, and joint events show both icons. Tooltips and accessible labels give the full type; unknown types use a question-mark icon.
+- The popover answers “Reset today?” with a large Yes or No. If the status is unavailable, it shows a dash. The next forecast sits below the answer.
+- Tibo’s post appears directly below the forecast. One button switches the post to the other language when both are available. The post starts in the interface language when available, and the choice persists when reopening the popover during this page session. Switching sends no extra API request. The latest Global and Banked resets appear beneath the post, newest first, followed by the footer with fetch time and icon actions.
+- Completion priority remains type-aware: a Banked completion does not hide a pending Global forecast, and joint schedules need both types completed. Confidence comes directly from the API; the dock retains its rounded 80% threshold while the popover can show lower probabilities.
+- Refreshes run every 10 minutes, with 60-second freshness checks on opening, foregrounding or reconnecting. Timeout, rate-limit, retry and error fallback behavior remains. Completion notifications name the type, deduplicate joint events, and can notify sequential events on the same day; first-load silence, browser permission via the bell, Web Locks and recent-ID deduplication remain.
 
 ## Install from source
 
@@ -62,6 +61,8 @@ The release tarball contains the same JavaScript, manifest, patch and locale fil
 
 - `action: "status"` — the latest global and Banked reset signals and the next scheduled reset.
 - `action: "records"` — one page of records, filtered by `kind`, `page`, and `pageSize`.
+
+Every record carries `resetType`: `global` (global reset), `banked` (banked reset) or `global_and_banked` (one event covering both). `kind` (`reset_scheduled` / `reset_completed`) is a separate axis and never substitutes for a type. Missing or unknown values are rendered as unknown, not guessed.
 
 The tool accepts an optional `lang` for record translations. Successful responses are cached for 60 seconds by default.
 
