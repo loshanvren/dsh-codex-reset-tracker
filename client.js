@@ -2,6 +2,7 @@ window.__ModuleLoader__.load({
   id: 'dsh-codex-reset-tracker',
   factory(require) {
     const React = require('react');
+    const { createPortal } = require('react-dom');
     const { useState, useEffect, useMemo, useCallback, useLayoutEffect, useRef } = React;
     const h = React.createElement;
     const useSyncExternalStore = React.useSyncExternalStore;
@@ -1379,6 +1380,11 @@ body[data-ds-dark-theme] .dcr-scope-mark.is-banked,body[data-ds-dark-theme] .dcr
         };
       }, [open, position && position.width, position && position.maxHeight, status.entry, status.phase]);
 
+      const panelVisible = open && position !== null;
+      useEffect(() => {
+        if (panelVisible && panelRef.current) panelRef.current.focus({ preventScroll: true });
+      }, [panelVisible]);
+
       const closeToTrigger = () => {
         setOpen(false);
         if (triggerRef.current) triggerRef.current.focus({ preventScroll: true });
@@ -1423,14 +1429,17 @@ body[data-ds-dark-theme] .dcr-scope-mark.is-banked,body[data-ds-dark-theme] .dcr
                 : t('chipName'),
             ),
           ),
+          // The composer establishes a containing block. Keep viewport-based
+          // positioning by mounting the fixed panel outside it, as the slot requires.
           open
-            ? h(
+            ? createPortal(h(
                 'section',
                 {
                   ref: panelRef,
                   id: panelId.current,
                   className: 'dcr-card',
                   role: 'dialog',
+                  tabIndex: -1,
                   'aria-label': t('statusOf'),
                   'aria-busy': busy,
                   style: panelStyle,
@@ -1495,7 +1504,7 @@ body[data-ds-dark-theme] .dcr-scope-mark.is-banked,body[data-ds-dark-theme] .dcr
                     ),
                   ),
                 ),
-              )
+              ), document.body)
             : null,
         ),
       );
