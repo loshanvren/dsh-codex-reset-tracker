@@ -821,25 +821,32 @@ test('the primary heading explicitly reports no completion despite a future fore
   const answer = descendants(forecast).find(n => n.props?.className === 'dcr-reset-state');
   assert.equal(textOf(answer), '否');
   assert.match(tree.props['aria-label'], /今天重置了吗？ 否/);
+  const heading = descendants(forecast).find(n => n.tag === 'h3');
+  assert.equal(visibleText(heading), '今天重置了吗？否');
   assert.equal(descendants(forecast).some(n => n.tag === 'svg'), false);
   assert.match(textOf(forecast), /明天 02:00/);
   assert.match(textOf(forecast), /≥86%/);
 });
 
-test('the primary answer is yes for every confirmed reset type', () => {
+test('the primary heading shows the confirmed reset type in both languages', () => {
   const { api } = client();
-  for (const [slot, type, forecastType] of [
-    ['latestBanked', 'banked', 'global'],
-    ['latestGlobal', 'global', 'banked'],
-    ['latestGlobal', 'global_and_banked', 'global_and_banked'],
-    ['latestGlobal', 'future_type', 'global'],
+  for (const [slot, type, forecastType, zhType, enType] of [
+    ['latestBanked', 'banked', 'global', '重置卡', 'Banked reset'],
+    ['latestGlobal', 'global', 'banked', '全体重置', 'Global reset'],
+    ['latestGlobal', 'global_and_banked', 'global_and_banked', '全体重置 + 重置卡', 'Global + Banked reset'],
+    ['latestGlobal', 'future_type', 'global', '类型未知', 'Unknown type'],
   ]) {
     const value = completeTodaySlot(slot, type);
     value.data.nextScheduled.resetType = forecastType;
-    for (const [localeId, messages, expected] of [['zh-CN', api.zh, '是'], ['en', api.en, 'Yes']]) {
+    for (const [localeId, messages, expected, typeLabel] of [['zh-CN', api.zh, '是', zhType], ['en', api.en, 'Yes', enType]]) {
       const tree = api.ResetSummary({data: value.data, t: (key) => messages[key], localeId, now});
-      const answer = descendants(tree).find(n => n.props?.className === 'dcr-reset-state');
+      const heading = descendants(tree).find(n => n.tag === 'h3');
+      const answer = descendants(heading).find(n => n.props?.className === 'dcr-reset-state');
       assert.equal(textOf(answer), expected);
+      assert.ok(visibleText(heading).includes(typeLabel), `${localeId}: ${typeLabel} is missing from the visible heading`);
+      if (type !== forecastType) {
+        assert.ok(!visibleText(heading).includes(messages[api.resetTypeLabelKey(forecastType)]));
+      }
     }
   }
 });
@@ -854,6 +861,7 @@ test('unknown completion timestamps stay explicitly unknown while the valid fore
   const heading = descendants(tree).find(n => n.tag === 'h3');
   const answer = descendants(heading).find(n => n.props?.className === 'dcr-reset-state');
   assert.equal(textOf(answer), '—');
+  assert.equal(visibleText(heading), '今天重置了吗？—');
   assert.equal(heading.props['aria-label'], '今天重置了吗？ 无法确认');
   assert.match(textOf(tree), /≥86%/);
 });
