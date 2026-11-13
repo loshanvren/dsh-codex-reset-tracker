@@ -657,9 +657,11 @@ test('a joint schedule stays visible until both kinds completed, then reports th
   verdict = api.reportedVerdict(separate.data, now);
   assert.equal(verdict.scheduled, false);
   assert.equal(verdict.answerKey, 'todayYes');
-  const rendered = summaryText(api.ResetSummary({ data: separate.data, t, localeId: 'en', now }));
+  const summary = api.ResetSummary({ data: separate.data, t, localeId: 'en', now });
+  const rendered = summaryText(summary);
   assert.match(rendered, /typeGlobalBanked/);
   assert.doesNotMatch(rendered, /upcomingQuestion/);
+  assert.equal(descendants(summary).some(n => n.tag === 'time' && n.props.dateTime === separate.data.latestGlobal.completedAt), false);
 });
 
 test('one joint completion covers both kinds and its double-slot snapshot stays joint', () => {
@@ -993,6 +995,10 @@ test('a manual Banked completion shows its newest linked Tibo announcement after
   assert.equal(recordsUrl.searchParams.get('lang'), 'zh-CN');
   const tree = c.renderDock();
   assert.equal(textOf(descendants(tree).find(n => n.props?.className === 'dcr-reset-state')), '是');
+  const heading = descendants(tree).find(n => n.props?.className === 'dcr-reset-heading');
+  const completion = descendants(heading).find(n => n.tag === 'time');
+  assert.equal(completion.props.dateTime, completedAt);
+  assert.equal(textOf(completion), '06:30');
   assert.match(textOf(tree), /暂无排期/);
   const history = descendants(tree).find(n => n.props?.className === 'dcr-recent');
   assert.equal(descendants(history).find(n => n.tag === 'time').props.dateTime, completedAt);
