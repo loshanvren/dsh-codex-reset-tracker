@@ -14,6 +14,7 @@ window.__ModuleLoader__.load({
     const AUTO_REFRESH_MS = 10 * 60 * 1000;
     const INTERACTIVE_REFRESH_MS = 60 * 1000;
     const REQUEST_TIMEOUT_MS = 20 * 1000;
+    const RELATED_SCHEDULE_TIMEOUT_MS = 5 * 1000;
     const RESET_NOTICE_STORAGE_KEY = 'dsh-codex-reset-tracker.reset-notice.v1';
     const MAX_RESET_NOTICE_KEYS = 128;
     const zh = {
@@ -498,18 +499,19 @@ window.__ModuleLoader__.load({
       if (!res.ok || !body || body.ok !== true) {
         const error = new Error((body && (body.detail || body.error)) || 'HTTP ' + res.status);
         error.status = res.status;
-        const retryHeader = res.headers.get('Retry-After');
-        const retrySeconds = body && typeof body.retryAfter === 'number'
-          ? body.retryAfter
-          : retryHeader && Number.isFinite(Number(retryHeader))
-            ? Number(retryHeader)
-            : retryHeader
-              ? Math.max(0, Math.ceil((Date.parse(retryHeader) - Date.now()) / 1000))
-              : null;
-        if (retrySeconds !== null && retrySeconds > 0) error.retryAfter = retrySeconds;
+        const retrySeconds = retryAfterSeconds(res, body);
+        if (retrySeconds > 0) error.retryAfter = retrySeconds;
         throw error;
       }
       return { data: body.data, meta: body.meta || null, rate, at: Date.now() };
+    }
+
+    function retryAfterSeconds(res, body) {
+      if (typeof body?.retryAfter === 'number') return body.retryAfter;
+      const header = res.headers.get('Retry-After');
+      if (!header) return 0;
+      const seconds = Number(header);
+      return Number.isFinite(seconds) ? seconds : Math.ceil((Date.parse(header) - Date.now()) / 1000);
     }
 
     function toInt(value) {
@@ -538,6 +540,10 @@ window.__ModuleLoader__.load({
 
     /** The module-level snapshot survives client remounts. */
     const statusStore = createStore({ phase: 'loading', entry: null, error: null, lang: null, retryAt: 0 });
+    const relatedSchedulesStore = createStore([]);
+    let relatedSchedulesPending = false;
+    let relatedSchedulesLookup = null;
+    let relatedSchedulesLimitedUntil = 0;
     const statusInflight = new Map();
     let statusPollUsers = 0;
     let statusPollLang = null;
@@ -747,6 +753,7 @@ window.__ModuleLoader__.load({
           if (requestedLang === lang) {
             retryAt = 0;
             statusStore.set({ phase: 'ready', entry: { ...fresh, lang }, error: null, lang, retryAt: 0 });
+            void refreshRelatedSchedules(fresh.data, fresh.rate);
             await observeResetCompletion(fresh.data);
           }
         } catch (err) {
@@ -1117,7 +1124,7 @@ body[data-ds-dark-theme] .dcr-scope-mark.is-banked,body[data-ds-dark-theme] .dcr
           ? source.handle.replace(/^@/, '').toLowerCase()
           : '';
         const isTiboPost = /^\/thsottiaux\/status\/\d+\/?$/i.test(url.pathname);
-        const isStatusUrl = /\/status\/\d+\/?$/i.test(url.pathname);
+        const isStatusUrl = /^\/i\/(?:web\/)?status\/\d+\/?$/i.test(url.pathname);
         if (
           url.protocol !== 'https:' ||
           !isSocialHost ||
@@ -1129,31 +1136,82 @@ body[data-ds-dark-theme] .dcr-scope-mark.is-banked,body[data-ds-dark-theme] .dcr
       }
     }
 
-    function latestTiboPost(data) {
-      const records = data
-        ? [data.latestGlobal, data.latestBanked, data.nextScheduled]
-            .filter(Boolean)
-            .map((record) => ({ record, translationLang: TIBO_TRANSLATION_LANG }))
-        : [];
-      return records
-        .map(({ record, translationLang }, index) => ({
-          record,
-          translationLang,
-          index,
-          url: tiboPostUrl(record),
-          at: Date.parse(record.announcedAt || record.completedAt || record.effectiveAt || ''),
-        }))
-        .filter((item) =>
-          item.url &&
-          [item.record.text, item.record.translatedText].some((text) =>
-            typeof text === 'string' && text.trim(),
-          ),
-        )
-        .sort((left, right) => {
-          const leftAt = Number.isFinite(left.at) ? left.at : -Infinity;
-          const rightAt = Number.isFinite(right.at) ? right.at : -Infinity;
-          return rightAt - leftAt || left.index - right.index;
-        })[0] || null;
+    function tiboPostCandidate(record) {
+      const url = tiboPostUrl(record);
+      if (!url || ![record.text, record.translatedText].some((text) => typeof text === 'string' && text.trim())) {
+        return null;
+      }
+      const postIso = [record.announcedAt, record.completedAt, record.effectiveAt]
+        .find((value) => typeof value === 'string' && Number.isFinite(Date.parse(value)));
+      return { record, url, postIso, at: postIso ? Date.parse(postIso) : -Infinity };
+    }
+
+    function relatedRecordIds(record) {
+      return Array.isArray(record.relatedRecordIds) ? record.relatedRecordIds : [];
+    }
+
+    function completionsWithoutTiboPost(data) {
+      return [data?.latestGlobal, data?.latestBanked].filter((record) =>
+        record?.kind === 'reset_completed' &&
+        (record.source?.origin === 'operator' || relatedRecordIds(record).length > 0) &&
+        !tiboPostCandidate(record),
+      );
+    }
+
+    async function refreshRelatedSchedules(data, rate) {
+      const completions = completionsWithoutTiboPost(data);
+      if (!completions.length || relatedSchedulesPending || rate.remaining === 0) return;
+      const key = JSON.stringify(completions.map((record) => [record.id, relatedRecordIds(record)]));
+      const now = Date.now();
+      if (now < relatedSchedulesLimitedUntil ||
+          (relatedSchedulesLookup?.key === key && now < relatedSchedulesLookup.expiresAt)) return;
+
+      // Fulfilled schedules are absent from nextScheduled and may be omitted from kind=all.
+      const url = new URL(API_BASE + '/records');
+      url.searchParams.set('kind', 'reset_scheduled');
+      url.searchParams.set('lang', TIBO_TRANSLATION_LANG);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), RELATED_SCHEDULE_TIMEOUT_MS);
+      relatedSchedulesPending = true;
+      relatedSchedulesLookup = { key, expiresAt: now + INTERACTIVE_REFRESH_MS };
+      try {
+        const res = await fetch(url.toString(), {
+          signal: controller.signal, cache: 'no-store', headers: { accept: 'application/json' },
+        });
+        if (res.status === 429) {
+          const body = await res.json().catch(() => null);
+          const seconds = Math.max(INTERACTIVE_REFRESH_MS / 1000, retryAfterSeconds(res, body) || 0);
+          relatedSchedulesLimitedUntil = Date.now() + seconds * 1000;
+        } else if (res.ok) {
+          const body = await res.json();
+          if (!controller.signal.aborted && body?.ok === true && Array.isArray(body.data?.items)) {
+            relatedSchedulesStore.set(body.data.items);
+          }
+        }
+      } catch {
+        // Supplemental post content is optional. Retain the last valid page.
+      } finally {
+        clearTimeout(timeout);
+        relatedSchedulesPending = false;
+        // A later status refresh may have found another completion during this request.
+        const latest = statusStore.getSnapshot().entry;
+        if (latest && latest.data !== data) void refreshRelatedSchedules(latest.data, latest.rate);
+      }
+    }
+
+    function latestTiboPost(data, relatedSchedules) {
+      const direct = [data?.latestGlobal, data?.latestBanked, data?.nextScheduled];
+      const completions = completionsWithoutTiboPost(data);
+      const linked = relatedSchedules.filter((record) =>
+        record?.kind === 'reset_scheduled' && record.scheduleState === 'fulfilled' &&
+        typeof record.announcedAt === 'string' && Number.isFinite(Date.parse(record.announcedAt)) &&
+        completions.some((completion) => {
+          if (record.completionRecordId) return record.completionRecordId === completion.id;
+          return typeof record.id === 'string' && relatedRecordIds(completion).includes(record.id);
+        }),
+      );
+      return [...direct, ...linked].map(tiboPostCandidate).filter(Boolean)
+        .sort((left, right) => right.at - left.at)[0] || null;
     }
 
     function tiboPostTextParts(record, translationLang) {
@@ -1187,14 +1245,14 @@ body[data-ds-dark-theme] .dcr-scope-mark.is-banked,body[data-ds-dark-theme] .dcr
       return parts.find((part) => part.lang === preferredLanguage) || parts[0] || null;
     }
 
-    function TiboPost({ data, localeId, t, preferredLanguage, onLanguageChange }) {
-      const item = latestTiboPost(data);
+    function TiboPost({ data, relatedSchedules = [], localeId, t, preferredLanguage, onLanguageChange }) {
+      const item = latestTiboPost(data, relatedSchedules);
       if (!item) return null;
-      const textParts = tiboPostTextParts(item.record, item.translationLang);
+      const textParts = tiboPostTextParts(item.record, TIBO_TRANSLATION_LANG);
       const part = selectedPostPart(textParts, preferredLanguage || (isZh(localeId) ? TIBO_TRANSLATION_LANG : 'en'));
       if (!part) return null;
       const alternate = textParts.find((candidate) => candidate.lang !== part.lang);
-      const postIso = item.record.announcedAt || item.record.completedAt || item.record.effectiveAt || '';
+      const postIso = item.postIso;
       return h('article', { className: 'dcr-tibo-post', 'aria-label': 'Tibo · ' + t('sourcePost') },
         h('div', { className: 'dcr-post-toolbar' },
           h('div', { className: 'dcr-post-byline' },
@@ -1254,6 +1312,7 @@ body[data-ds-dark-theme] .dcr-scope-mark.is-banked,body[data-ds-dark-theme] .dcr
       const localeId = localeIdOf(locale);
       const lang = siteLangOf(localeId);
       const status = useSyncExternalStore(statusStore.subscribe, statusStore.getSnapshot);
+      const relatedSchedules = useSyncExternalStore(relatedSchedulesStore.subscribe, relatedSchedulesStore.getSnapshot);
       const [open, setOpen] = useState(false);
       const [now, setNow] = useState(() => Date.now());
       const [position, setPosition] = useState(null);
@@ -1462,6 +1521,7 @@ body[data-ds-dark-theme] .dcr-scope-mark.is-banked,body[data-ds-dark-theme] .dcr
                   preferredLanguage: postLanguage,
                   onLanguageChange: setPostLanguage,
                   data,
+                  relatedSchedules,
                   localeId,
                   t,
                 }),
