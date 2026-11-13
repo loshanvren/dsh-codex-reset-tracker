@@ -575,7 +575,7 @@ window.__ModuleLoader__.load({
         const key = record.id ? 'id:' + record.id : 'time:' + record.resetType + ':' + time.value;
         if (seenKeys.has(key)) continue;
         seenKeys.add(key);
-        events.push({ key, type: resetTypeOf(record) || 'unknown' });
+        events.push({ key, type: resetTypeOf(record) || 'unknown', time });
       }
       return events;
     }
@@ -938,14 +938,16 @@ body[data-ds-dark-theme] .dcr-chip-probability{color:#a78bfa}
 .dcr-notify-toggle:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px}
 .dcr-spin{animation:dcr-rot .8s linear infinite}
 @keyframes dcr-rot{to{transform:rotate(360deg)}}
-.dcr-status-line{box-sizing:border-box;width:100%;min-width:0;margin-top:20px;color:var(--dsw-alias-label-primary);line-height:1.4;text-align:left}
+.dcr-status-line{box-sizing:border-box;width:100%;min-width:0;margin-top:16px;color:var(--dsw-alias-label-primary);line-height:1.4;text-align:left}
 .dcr-forecast{min-width:0}
-.dcr-reset-heading{display:flex;align-items:center;flex-wrap:wrap;gap:2px 12px;margin:0;color:var(--dsw-alias-label-secondary);font-size:13px;font-weight:500}
-.dcr-reset-answer,.dcr-reset-types{display:inline-flex;align-items:center;flex-wrap:wrap;gap:4px 8px;min-width:0}
-.dcr-reset-state{color:var(--dsw-alias-label-primary);font-size:38px;font-weight:700;line-height:1.15;letter-spacing:-.02em}
+.dcr-reset-heading{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px;min-height:48px;margin:0;color:var(--dsw-alias-label-secondary);font-size:13px;font-weight:500}
+.dcr-reset-copy{display:grid;gap:3px;min-width:0;overflow-wrap:anywhere}
+.dcr-reset-completion{display:flex;align-items:baseline;flex-wrap:wrap;gap:0 6px;color:var(--dsw-alias-label-primary);font-size:14px;font-weight:600}
+.dcr-completion-time{color:var(--dsw-alias-label-secondary);font-size:12px;font-weight:500;font-variant-numeric:tabular-nums;white-space:nowrap}
+.dcr-completion-time::before{content:"·";margin-inline-end:6px}
+.dcr-reset-state{color:var(--dsw-alias-label-primary);font-size:34px;font-weight:700;line-height:1.15;letter-spacing:-.02em}
 .dcr-reset-state[data-reset-state=todayYes]{color:var(--dsw-alias-state-business-primary)}
-.dcr-reset-type{box-sizing:border-box;max-width:100%;padding:2px 8px;border-radius:6px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);font-size:12px;line-height:1.5;overflow-wrap:anywhere}
-.dcr-reset-outlook{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 6px;margin-top:12px;color:var(--dsw-alias-label-secondary);font-size:13px;line-height:1.6}
+.dcr-reset-outlook{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 6px;margin-top:6px;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:1.6}
 .dcr-forecast-time{font-variant-numeric:tabular-nums}
 .dcr-forecast-probability{color:#6d28d9;font-size:13px;font-weight:600;font-variant-numeric:tabular-nums}
 body[data-ds-dark-theme] .dcr-forecast-probability{color:#c4b5fd}
@@ -988,6 +990,13 @@ body[data-ds-dark-theme] .dcr-scope-mark.is-banked,body[data-ds-dark-theme] .dcr
 @media(max-width:420px){
   .dcr-card{width:min(340px,calc(100vw - 16px));padding:16px}
   .dcr-summary-subvalue{min-width:42px}
+}
+@media(max-width:280px){
+  .dcr-completion-time::before{content:none}
+  .dcr-summary-latest{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:0 8px;min-height:38px}
+  .dcr-summary-latest>.dcr-scope-mark,.dcr-recent-kind{grid-row:span 2}
+  .dcr-recent-kind{overflow-wrap:anywhere}
+  .dcr-summary-value,.dcr-summary-subvalue{grid-column:3;text-align:end}
 }
 @media(pointer:coarse){
   .dcr-dock-button,.dcr-dock-sizer,.dcr-panel-icon-button{min-width:44px;min-height:44px}
@@ -1070,9 +1079,13 @@ body[data-ds-dark-theme] .dcr-scope-mark.is-banked,body[data-ds-dark-theme] .dcr
       const answerKey = completionAnswerKey(verdict.completed);
       const unknown = answerKey === 'todayUnknown';
       const answerLabel = t('todayQuestion') + ' ' + t(answerKey);
-      const completedTypes = answerKey === 'todayYes'
-        ? completedTypeLabelKeys(verdict.completed).map((key) => ({ key, label: t(key) }))
-        : [];
+      const completedTypeKeys = answerKey === 'todayYes' ? completedTypeLabelKeys(verdict.completed) : [];
+      const completedTypes = completedTypeKeys.map((key) => t(key));
+      const events = completedTypeKeys.length === 1 ? todayCompletionEvents(data, now) : [];
+      const event = events.length === 1 ? events[0] : null;
+      // A single time describes one confirmed event, not a sum of separate resets.
+      const completionAt = event && resetTypeLabelKey(event.type) === completedTypeKeys[0] &&
+        event.time.field !== 'announcedAt' ? event.time.value : null;
       const next = data && data.nextScheduled;
       const window = next && next.scheduleWindow;
       const target = window && (window.startAt || window.endAt) || next && next.effectiveAt;
@@ -1084,21 +1097,22 @@ body[data-ds-dark-theme] .dcr-scope-mark.is-banked,body[data-ds-dark-theme] .dcr
       const hasUpcoming = next && next.kind === 'reset_scheduled' && (!next.scheduleState || next.scheduleState === 'pending') &&
         (!Number.isFinite(expiresAt) || expiresAt >= currentAt);
       const accessible = [answerLabel,
-        ...completedTypes.map(({ label }) => label),
+        ...completedTypes,
         ...(verdict.scheduled ? [t(verdict.questionKey), probability, t(verdict.answerKey)] : []),
         next ? t('nextScheduleLabel') + ' · ' + resetScopeLabel(next, t) + ' · ' + nextText : '',
       ].filter(Boolean).join(' · ');
       return h('section', { className: 'dcr-status-line', 'aria-label': accessible },
         h('div', { className: 'dcr-forecast' },
           h('h3', { className: 'dcr-reset-heading', 'aria-label': unknown ? answerLabel : undefined },
-            h('span', null, t('todayQuestion')),
-            h('span', { className: 'dcr-reset-answer' },
-              h('strong', { className: 'dcr-reset-state', 'data-reset-state': answerKey, title: unknown ? t(answerKey) : undefined },
-                unknown ? '—' : t(answerKey)),
-              completedTypes.length ? h('span', { className: 'dcr-reset-types' },
-                ...completedTypes.map(({ key, label }) => h('span', { key, className: 'dcr-reset-type' }, label)),
+            h('span', { className: 'dcr-reset-copy' },
+              h('span', null, t('todayQuestion')),
+              completedTypes.length ? h('span', { className: 'dcr-reset-completion' },
+                h('span', null, completedTypes.join(' · ')),
+                completionAt ? h('time', { className: 'dcr-completion-time', dateTime: completionAt }, fmtClock(completionAt, localeId)) : null,
               ) : null,
             ),
+            h('strong', { className: 'dcr-reset-state', 'data-reset-state': answerKey, title: unknown ? t(answerKey) : undefined },
+              unknown ? '—' : t(answerKey)),
           ),
           h('div', { className: 'dcr-reset-outlook' },
             hasUpcoming ? [
