@@ -18,6 +18,7 @@ function client(shared = {}) {
   let moduleId;
   let requests = [];
   let response = fixture;
+  let dockOpen = false;
   const storageAccesses = [];
   const storage = shared.storage || new Map();
   const notifications = shared.notifications || [];
@@ -45,7 +46,9 @@ function client(shared = {}) {
   }
   const react = {
     createElement: (tag, props, ...children) => ({ tag, props, children: children.flat(Infinity) }),
-    useState: (initial) => [typeof initial === 'function' ? initial() : initial, () => {}],
+    useState: (initial) => initial === false
+      ? [dockOpen, (open) => { dockOpen = open; }]
+      : [typeof initial === 'function' ? initial() : initial, () => {}],
     useEffect() {},
     useLayoutEffect() {},
     useMemo: (fn) => fn(),
@@ -873,6 +876,228 @@ test('a source post renders one language and offers a single button for the othe
     assert.equal(controls.length, 1);
     assert.equal(textOf(controls[0]), switchLabel);
   }
+});
+
+function operatorCompletionFixture() {
+  const completionId = 'manual:completion';
+  const completedAt = '2026-11-12T22:30:00.000Z';
+  const status = {
+    ok: true,
+    data: {
+      currentTime: '2026-11-13T06:20:00.000Z',
+      timeZone: 'Asia/Shanghai',
+      latestGlobal: { ...fixture.data.latestGlobal, announcedAt: '2026-10-28T06:29:38.000Z' },
+      latestBanked: {
+        id: completionId,
+        kind: 'reset_completed',
+        resetType: 'banked',
+        announcedAt: null,
+        effectiveAt: completedAt,
+        completedAt,
+        text: null,
+        translatedText: null,
+        source: { origin: 'operator', postId: null, handle: null, url: null },
+        relatedRecordIds: ['102', '103', '105', '106', '107', '108'],
+      },
+      nextScheduled: null,
+    },
+  };
+  const schedule = (id, fields) => ({
+    id,
+    kind: 'reset_scheduled',
+    resetType: 'banked',
+    announcedAt: '2026-11-12T21:59:39.000Z',
+    effectiveAt: '2026-11-12T08:00:00.000Z',
+    completedAt,
+    text: 'The banked reset has been activated.',
+    translatedText: '重置卡已启用。',
+    source: { origin: 'x', postId: id, handle: 'thsottiaux', url: 'https://x.com/thsottiaux/status/' + id },
+    scheduleState: 'fulfilled',
+    completionRecordId: completionId,
+    ...fields,
+  });
+  const announcement = schedule('101');
+  const records = {
+    ok: true,
+    data: {
+      items: [
+        schedule('104', {
+          announcedAt: '2026-11-12T22:20:00.000Z',
+          completionRecordId: 'manual:unrelated',
+          text: 'Unrelated reset announced on the same day.',
+        }),
+        schedule('103', {
+          announcedAt: '2026-11-12T22:10:00.000Z',
+          source: { origin: 'x', postId: '103', handle: 'thsottiaux', url: 'https://x.com/another/status/103' },
+        }),
+        schedule('105', {
+          announcedAt: '2026-11-12T22:22:00.000Z',
+          completionRecordId: 'manual:unrelated',
+        }),
+        schedule('106', {
+          announcedAt: '2026-11-12T22:23:00.000Z',
+          completionRecordId: null,
+          scheduleState: 'pending',
+        }),
+        schedule('107', { announcedAt: 'invalid announcement date' }),
+        schedule('108', {
+          announcedAt: '2026-11-12T22:24:00.000Z',
+          text: '  ',
+          translatedText: null,
+        }),
+        schedule('102', { announcedAt: '2026-11-11T06:57:08.000Z', completionRecordId: null, text: 'Earlier hint.' }),
+        announcement,
+      ],
+    },
+  };
+  return { status, records, announcement, completedAt };
+}
+
+const jsonResponse = (body, init = {}) => ({
+  ok: true, headers: new Headers(), json: async () => body, ...init,
+});
+const featuredPost = (tree) => descendants(tree).find(n => n.props?.className === 'dcr-tibo-post');
+
+test('a manual Banked completion shows its newest linked Tibo announcement after refresh', async () => {
+  const c = client();
+  const { status, records, announcement, completedAt } = operatorCompletionFixture();
+  const current = Date.parse(status.data.currentTime);
+  c.advance(current - now);
+  c.respond((raw) => jsonResponse(new URL(raw).pathname.endsWith('/status') ? status : records));
+  await c.api.ensureStatus('zh-CN', true);
+  await flush();
+  dockButton(c.renderDock()).props.onClick();
+  for (const [localeId, message, other] of [
+    ['zh-CN', announcement.translatedText, 'English'],
+    ['en', announcement.text, '中文'],
+  ]) {
+    const post = featuredPost(c.renderDock(localeId));
+    const nodes = descendants(post);
+    assert.equal(textOf(nodes.find(n => n.props?.className === 'dcr-tibo-text')), message);
+    assert.equal(nodes.find(n => n.tag === 'a').props.href, announcement.source.url);
+    assert.equal(nodes.find(n => n.tag === 'time').props.dateTime, announcement.announcedAt);
+    assert.deepEqual(nodes.filter(n => n.tag === 'button').map(textOf), [other]);
+  }
+  assert.equal(c.requests.length, 2);
+  const recordsUrl = new URL(c.requests[1].url);
+  assert.equal(recordsUrl.pathname, '/openapi/v1/records');
+  assert.equal(recordsUrl.searchParams.get('kind'), 'reset_scheduled');
+  assert.equal(recordsUrl.searchParams.get('lang'), 'zh-CN');
+  const tree = c.renderDock();
+  assert.equal(textOf(descendants(tree).find(n => n.props?.className === 'dcr-reset-state')), '是');
+  assert.match(textOf(tree), /暂无排期/);
+  const history = descendants(tree).find(n => n.props?.className === 'dcr-recent');
+  assert.equal(descendants(history).find(n => n.tag === 'time').props.dateTime, completedAt);
+});
+
+test('a direct related ID can recover a fulfilled announcement and preserve authorless X URLs', async () => {
+  const c = client();
+  const { status, records, announcement } = operatorCompletionFixture();
+  status.data.latestBanked.relatedRecordIds = [announcement.id];
+  announcement.completionRecordId = null;
+  announcement.source.url = 'https://twitter.com/i/web/status/' + announcement.id;
+  c.respond((raw) => jsonResponse(new URL(raw).pathname.endsWith('/status') ? status : records));
+  await c.api.ensureStatus('en', true);
+  await flush();
+  dockButton(c.renderDock('en')).props.onClick();
+  const post = featuredPost(c.renderDock('en'));
+  assert.equal(descendants(post).find(n => n.tag === 'a').props.href, announcement.source.url);
+});
+
+test('a slow supplemental request leaves the status and notification ready, then can retry', async () => {
+  const c = client();
+  const { status, records, announcement } = operatorCompletionFixture();
+  const initial = structuredClone(status);
+  initial.data.latestBanked = null;
+  c.advance(Date.parse(status.data.currentTime) - now);
+  c.respond(initial);
+  await c.api.ensureStatus('zh-CN', true);
+  dockButton(c.renderDock()).props.onClick();
+  let relatedSignal;
+  c.respond((raw, { signal }) => {
+    if (new URL(raw).pathname.endsWith('/status')) return jsonResponse(status);
+    relatedSignal = signal;
+    return new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason)));
+  });
+  await c.api.ensureStatus('zh-CN', true);
+  assert.equal(c.api.statusStore.getSnapshot().phase, 'ready');
+  assert.equal(c.notifications.length, 1);
+  assert.equal(descendants(featuredPost(c.renderDock())).find(n => n.tag === 'a').props.href, status.data.latestGlobal.source.url);
+  assert.equal(c.timeouts.size, 1);
+  for (const timeout of c.timeouts.keys()) timeout();
+  await flush();
+  assert.equal(relatedSignal.aborted, true);
+  assert.equal(c.timeouts.size, 0);
+  assert.equal(c.api.statusStore.getSnapshot().phase, 'ready');
+  c.respond((raw) => jsonResponse(new URL(raw).pathname.endsWith('/status') ? status : records));
+  await c.api.ensureStatus('zh-CN', true);
+  assert.equal(c.requests.filter(r => new URL(r.url).pathname.endsWith('/records')).length, 1);
+  c.advance(60_001);
+  await c.api.ensureStatus('zh-CN', true);
+  await flush();
+  assert.equal(c.requests.filter(r => new URL(r.url).pathname.endsWith('/records')).length, 2);
+  assert.equal(descendants(featuredPost(c.renderDock())).find(n => n.tag === 'a').props.href, announcement.source.url);
+  assert.equal(c.notifications.length, 1);
+});
+
+test('a new completion can fetch its own linked post after an older lookup finishes', async () => {
+  const c = client();
+  const { status, records, announcement } = operatorCompletionFixture();
+  const updatedStatus = structuredClone(status);
+  updatedStatus.data.latestBanked.id = 'manual:later-completion';
+  updatedStatus.data.latestBanked.relatedRecordIds = ['201'];
+  const later = {
+    ...announcement,
+    id: '201',
+    announcedAt: '2026-11-12T22:09:00.000Z',
+    completionRecordId: updatedStatus.data.latestBanked.id,
+    source: { ...announcement.source, postId: '201', url: 'https://x.com/thsottiaux/status/201' },
+  };
+  let finish;
+  c.respond((raw) => {
+    if (new URL(raw).pathname.endsWith('/status')) return jsonResponse(status);
+    return new Promise((resolve) => { finish = () => resolve(jsonResponse(records)); });
+  });
+  await c.api.ensureStatus('en', true);
+  c.respond((raw) => jsonResponse(new URL(raw).pathname.endsWith('/status')
+    ? updatedStatus : { ok: true, data: { items: [later] } }));
+  await c.api.ensureStatus('en', true);
+  assert.equal(c.requests.length, 3);
+  finish();
+  await flush();
+  assert.equal(c.requests.length, 4);
+  dockButton(c.renderDock('en')).props.onClick();
+  const post = featuredPost(c.renderDock('en'));
+  assert.equal(descendants(post).find(n => n.tag === 'a').props.href, later.source.url);
+});
+
+test('a rate-limited history refresh preserves the displayed source post during cooldown', async () => {
+  const c = client();
+  const { status, records, announcement } = operatorCompletionFixture();
+  let recordsRequests = 0;
+  c.respond((raw) => {
+    if (new URL(raw).pathname.endsWith('/status')) return jsonResponse(status);
+    recordsRequests += 1;
+    if (recordsRequests !== 2) return jsonResponse(records);
+    return jsonResponse({ ok: false, error: 'rate_limited' }, {
+      ok: false, status: 429, headers: new Headers({ 'Retry-After': '120' }),
+    });
+  });
+  await c.api.ensureStatus('en', true);
+  await flush();
+  dockButton(c.renderDock('en')).props.onClick();
+  c.advance(60_001);
+  await c.api.ensureStatus('en', true);
+  await flush();
+  assert.equal(c.api.statusStore.getSnapshot().phase, 'ready');
+  assert.equal(descendants(featuredPost(c.renderDock('en'))).find(n => n.tag === 'a').props.href, announcement.source.url);
+  c.advance(61_000);
+  await c.api.ensureStatus('en', true);
+  assert.equal(recordsRequests, 2);
+  c.advance(60_000);
+  await c.api.ensureStatus('en', true);
+  await flush();
+  assert.equal(recordsRequests, 3);
 });
 
 test('missing translation falls back to available source text without inventing a translation', () => {
