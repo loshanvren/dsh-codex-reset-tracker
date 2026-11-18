@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.4] - 2026-11-18
+
+### Fixed
+
+- Show the reset popover immediately above the Codex entry in a docked conversation. Keep it inside the window as the composer moves and let the content scroll when vertical space is limited.
+- Place the Codex entry beside the active statistics in Claude Style, including its context meter and compact footer. Use the host's menu styling for the popover and a single surface behind its content and actions.
+
 ## [0.6.3] - 2026-11-13
 
 ### Changed
@@ -19,6 +26,7 @@
 
 - Show the linked Tibo announcement when the latest reset confirmation has no post of its own. A Banked reset can now update both the recent history and the post above it, with the completion time and publication time shown separately.
 
+[0.6.4]: https://github.com/loshanvren/dsh-codex-reset-tracker/releases/tag/v0.6.4
 [0.6.3]: https://github.com/loshanvren/dsh-codex-reset-tracker/releases/tag/v0.6.3
 [0.6.2]: https://github.com/loshanvren/dsh-codex-reset-tracker/releases/tag/v0.6.2
 [0.6.1]: https://github.com/loshanvren/dsh-codex-reset-tracker/releases/tag/v0.6.1

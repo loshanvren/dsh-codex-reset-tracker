@@ -10,6 +10,7 @@ const now = Date.parse('2026-10-22T10:11:53.095Z');
 function client(shared = {}) {
   const window = new EventTarget();
   const document = new EventTarget();
+  document.body = {};
   document.visibilityState = 'visible';
   const intervals = new Map();
   const timeouts = new Map();
@@ -58,7 +59,11 @@ function client(shared = {}) {
   };
   window.__ModuleLoader__ = { load(module) {
     moduleId = module.id;
-    api = module.factory(() => react);
+    // The real DSH client loader exposes react-dom like the host bundle does;
+    // stub createPortal as a plain wrapper node so tree traversal stays uniform.
+    api = module.factory((name) => name === 'react-dom'
+      ? { createPortal: (children, container) => ({ tag: 'div', props: { 'data-dcr-portal': '', container }, children: [children] }) }
+      : react);
   } };
   class Clock extends Date { static now() { return clock; } }
   const globals = {
@@ -125,6 +130,18 @@ test('installation identity includes tracker in manifest, lockfile, loader and p
   assert.equal(lock.packages[''].name, name);
   assert.equal(client().moduleId, name);
   assert.match(readFileSync(new URL('../cordis.patch.yml', import.meta.url), 'utf8'), /name: 'dsh-codex-reset-tracker'/);
+});
+
+test('the dock opens its fixed dialog in a portal attached to the body', () => {
+  const c = client();
+  const closed = c.renderDock();
+  assert.equal(descendants(closed).some((node) => node.props?.role === 'dialog'), false);
+  dockButton(closed).props.onClick();
+  const open = c.renderDock();
+  const portal = descendants(open).find((node) => node.props?.['data-dcr-portal'] === '');
+  assert.equal(portal?.props.container, c.document.body);
+  const dialog = descendants(portal).find((node) => node.props?.role === 'dialog');
+  assert.equal(dialog?.props.id, dockButton(open).props['aria-controls']);
 });
 
 test('dock displays high-confidence forecasts in either language without adding Yes', async () => {
