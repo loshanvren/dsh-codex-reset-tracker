@@ -2,6 +2,7 @@ window.__ModuleLoader__.load({
   id: 'dsh-codex-reset-tracker',
   factory(require) {
     const React = require('react');
+    const { createPortal } = require('react-dom');
     const { useState, useEffect, useMemo, useCallback, useLayoutEffect, useRef } = React;
     const h = React.createElement;
     const useSyncExternalStore = React.useSyncExternalStore;
@@ -900,7 +901,7 @@ window.__ModuleLoader__.load({
     }
 
     const CSS = `
-.dcr-dock{position:relative;display:inline-grid;flex:0 1 auto;align-items:center;min-width:0;max-width:100%;overflow:hidden;color:var(--dsw-alias-label-primary);font:inherit}
+.dcr-dock{position:relative;display:inline-grid;flex:0 1 auto;align-items:center;min-width:0;max-width:100%;color:var(--dsw-alias-label-primary);font:inherit}
 .dcr-dock-button,.dcr-dock-sizer{grid-area:1/1;position:relative;display:inline-flex;align-items:center;gap:6px;min-height:28px;min-width:0;padding:3px 8px;border:0;box-sizing:border-box;font:inherit;font-size:12px;font-weight:550;white-space:nowrap}
 .dcr-dock-button{justify-self:start;width:max-content;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;transition:background .14s ease}
 .dcr-dock-sizer{visibility:hidden;pointer-events:none;font-weight:650}
@@ -913,9 +914,15 @@ body[data-ds-dark-theme] .dcr-chip-probability{color:#a78bfa}
 .dcr-dock-button:focus-visible,.dcr-panel-icon-button:focus-visible,.dcr-refresh-action:focus-visible,.dcr-btn:focus-visible,.dcr-external-link:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px}
 .dcr-external-link:focus-visible{text-decoration:underline}
 .dcr-dock-glyph{display:inline-flex;align-items:center;justify-content:center;flex:none;color:var(--dsw-alias-state-business-primary)}
-.dcr-card{position:fixed;z-index:2147483000;box-sizing:border-box;display:flex;flex-direction:column;gap:0;width:min(340px,calc(100vw - 24px));max-height:min(540px,calc(100dvh - 16px));overflow:auto;overscroll-behavior:contain;padding:18px;border:0;border-radius:16px;background:var(--dsw-alias-bg-base,var(--dsw-alias-bg-layer-1));color:var(--dsw-alias-label-primary);--dsw-elevation-stroke-color:var(--dsw-alias-border-l1);box-shadow:var(--dsw-elevation-prominent,0 8px 28px rgba(9,12,24,.18));font:inherit;animation:dcr-in .16s cubic-bezier(.23,1,.32,1) both}
-@keyframes dcr-in{from{opacity:0;transform:translateY(4px) scale(.99)}to{opacity:1;transform:translateY(0) scale(1)}}
-.dcr-head{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0}
+.dcr-status-button{align-self:center;flex:none;gap:4px;min-height:22px;padding:0 4px;border-radius:var(--dsw-radius-sm,6px);font-family:var(--dsw-font-family);font-size:calc(13px * var(--dsh-claude-interface-font-scale,1));font-weight:500;line-height:20px;color:var(--dsw-alias-label-primary);opacity:var(--dsh-claude-footer-ink-opacity,.82)}
+.dcr-status-button:hover,.dcr-status-button[aria-expanded=true],.dcr-status-button:focus-visible{background:transparent;color:var(--dsw-alias-label-primary);font-weight:500;opacity:var(--dsh-claude-footer-ink-hover-opacity,1)}
+.dcr-status-button .dcr-dock-glyph,.dcr-status-button .dcr-scope-mark{color:inherit}
+.dcr-status-button .dcr-chip-probability,body[data-ds-dark-theme] .dcr-status-button .dcr-chip-probability{color:inherit}
+.dcr-status-button .dcr-dock-glyph svg{width:14px;height:14px}
+.dcr-card{position:fixed;z-index:2147483000;box-sizing:border-box;display:flex;flex-direction:column;gap:0;width:min(340px,calc(100vw - 24px));max-height:min(540px,calc(100dvh - 16px));overflow:hidden;padding:16px;border:0;border-radius:var(--dsw-radius-lg,14px);background:var(--dsw-specific-menu,var(--dsw-alias-bg-overlay,var(--dsw-alias-bg-layer-1)));backdrop-filter:var(--dsw-menu-backdrop-filter,blur(14px));color:var(--dsw-alias-label-primary);--dsw-elevation-stroke-color:var(--dsw-alias-border-l1);box-shadow:var(--dsw-elevation-prominent,0 8px 28px rgba(9,12,24,.18));font:inherit;animation:dcr-in .16s cubic-bezier(.23,1,.32,1) both}
+@keyframes dcr-in{from{opacity:0}to{opacity:1}}
+.dcr-content{min-height:0;overflow:auto;overscroll-behavior:contain}
+.dcr-head{flex:none;display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0}
 .dcr-title-group{display:flex;align-items:center;gap:8px;min-width:0}
 .dcr-title-glyph{display:inline-flex;flex:none;align-items:center;justify-content:center;color:var(--dsw-alias-state-business-primary)}
 .dcr-title{margin:0;color:var(--dsw-alias-label-primary);font-size:14px;font-weight:600;line-height:20px;text-wrap:balance}
@@ -983,10 +990,13 @@ body[data-ds-dark-theme] .dcr-scope-mark.is-banked,body[data-ds-dark-theme] .dcr
 .dcr-error-title{color:var(--dsw-alias-label-primary);font-size:.875em;font-weight:500;line-height:1.4}
 .dcr-error-text{margin-top:.2em;color:var(--dsw-alias-label-secondary);font-size:.8125em;line-height:1.45;overflow-wrap:anywhere}
 .dcr-error .dcr-btn{width:auto;min-width:36px;height:32px;padding:0 10px;font-size:.8125em;white-space:nowrap}
-.dcr-foot{position:sticky;bottom:0;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;gap:12px;min-width:0;margin-top:12px;padding-top:10px;border-top:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base,var(--dsw-alias-bg-layer-1));color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}
+.dcr-foot{flex-shrink:0;display:flex;align-items:center;justify-content:space-between;gap:12px;min-width:0;margin-top:12px;padding-top:10px;border-top:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}
 .dcr-foot-tools .dcr-source-link{width:30px;height:30px;min-height:30px}
 .dcr-foot-tools{display:inline-flex;align-items:center;justify-content:flex-end;gap:0;min-width:0}
 .dcr-source-link,.dcr-source-action{min-height:24px}
+@media(max-width:480px){
+  .dcr-status-button .dcr-chip-probability{display:none}
+}
 @media(max-width:420px){
   .dcr-card{width:min(340px,calc(100vw - 16px));padding:16px}
   .dcr-summary-subvalue{min-width:42px}
@@ -1326,6 +1336,57 @@ body[data-ds-dark-theme] .dcr-scope-mark.is-banked,body[data-ds-dark-theme] .dcr
       );
     }
 
+    function useClaudeStatusRow(slotRef) {
+      const [row, setRow] = useState(null);
+      useLayoutEffect(() => {
+        const seat = slotRef.current?.closest('[data-composer-seat]');
+        if (!seat) return undefined;
+        const theme = 'data-dsh-claude-style';
+        const placement = 'data-dsh-claude-stats-position';
+        const ring = 'data-dsh-claude-meter-ring';
+        const meter = 'data-dsh-claude-context-meter';
+        const hiddenMeter = 'data-dsh-claude-meter-hidden';
+        const inlineStats = 'data-dsh-claude-inline-stats';
+        let observingSeat = false;
+        const sync = () => {
+          const active = document.body.hasAttribute(theme);
+          if (active !== observingSeat) {
+            observingSeat = active;
+            composeObserver.disconnect();
+            if (active) {
+              composeObserver.observe(seat, {
+                childList: true,
+                subtree: true,
+                attributes: true,
+                attributeFilter: [ring, meter, hiddenMeter, inlineStats],
+              });
+            }
+          }
+          if (!active) {
+            setRow(null);
+            return;
+          }
+          // The theme draws the context meter within its composer model slot.
+          // Its optional inline/footer statistics supply their own visible line.
+          const position = document.body.getAttribute(placement);
+          const stats = position === 'inline' || position === 'footer'
+            ? seat.querySelector(`[${inlineStats}]`)
+            : null;
+          const context = seat.querySelector(`[${ring}]`) ?? seat.querySelector(`[${meter}]:not([${hiddenMeter}])`);
+          setRow(stats ?? context?.parentElement ?? null);
+        };
+        const composeObserver = new MutationObserver(sync);
+        const themeObserver = new MutationObserver(sync);
+        themeObserver.observe(document.body, { attributes: true, attributeFilter: [theme, placement] });
+        sync();
+        return () => {
+          composeObserver.disconnect();
+          themeObserver.disconnect();
+        };
+      }, [slotRef]);
+      return row;
+    }
+
     function CodexResetDock(props) {
       const locale = props.locale;
       const t = useMemo(() => makeT(props.t || ((key) => key)), [props.t]);
@@ -1343,9 +1404,24 @@ body[data-ds-dark-theme] .dcr-scope-mark.is-banked,body[data-ds-dark-theme] .dcr
       const [noticePermission, setNoticePermission] = useState(notificationPermission);
       const [postLanguage, setPostLanguage] = useState(() => isZh(localeId) ? TIBO_TRANSLATION_LANG : 'en');
       useEffect(() => setPostLanguage(isZh(localeId) ? TIBO_TRANSLATION_LANG : 'en'), [localeId]);
+      const slotRef = useRef(null);
+      const statusRow = useClaudeStatusRow(slotRef);
       const triggerRef = useRef(null);
       const panelRef = useRef(null);
+      const closeButtonRef = useRef(null);
       const panelId = useRef('dcr-popover-' + Math.random().toString(36).slice(2));
+      // Opening the card breaks the natural Tab chain out of the docked
+      // composer, so move focus to the card's close control on open; Escape
+      // and the close button hand focus back to the dock entry below.
+      // The card renders hidden until the layout effect computes a position;
+      // focus it only once it is actually visible, and do not steal focus on
+      // later resize/scroll repositions.
+      const positioned = position !== null;
+      useEffect(() => {
+        if (!open || !positioned || !closeButtonRef.current) return undefined;
+        closeButtonRef.current.focus({ preventScroll: true });
+        return undefined;
+      }, [open, positioned]);
       const busy = status.phase === 'loading' || status.phase === 'refreshing';
       const data = status.entry ? status.entry.data : null;
       const fetchedAt = status.entry ? status.entry.at : null;
@@ -1415,24 +1491,30 @@ body[data-ds-dark-theme] .dcr-scope-mark.is-banked,body[data-ds-dark-theme] .dcr
           const viewportWidth = visualViewport ? visualViewport.width : window.innerWidth;
           const viewportHeight = visualViewport ? visualViewport.height : window.innerHeight;
           const width = Math.max(1, Math.min(340, viewportWidth - (viewportWidth <= 420 ? 16 : 24)));
-          const maxHeight = Math.max(1, Math.min(540, viewportHeight - 16));
-          const panelRect = panel.getBoundingClientRect();
-          const panelWidth = Math.min(width, panelRect.width || width);
-          const panelHeight = Math.min(maxHeight, panelRect.height || maxHeight);
           const triggerRect = trigger.getBoundingClientRect();
           const minLeft = viewportLeft + 8;
-          const maxLeft = Math.max(minLeft, viewportLeft + viewportWidth - panelWidth - 8);
-          const left = Math.max(minLeft, Math.min(triggerRect.left, maxLeft));
+          const maxLeft = Math.max(minLeft, viewportLeft + viewportWidth - width - 8);
+          // Claude Style aligns its context panel and trigger on the right.
+          const anchorLeft = statusRow ? triggerRect.right - width : triggerRect.left;
+          const left = Math.max(minLeft, Math.min(anchorLeft, maxLeft));
           const minTop = viewportTop + 8;
-          const maxTop = Math.max(minTop, viewportTop + viewportHeight - panelHeight - 8);
-          const above = triggerRect.top - panelHeight - 8 >= minTop;
+          const bottom = viewportTop + viewportHeight - 8;
+          const roomAbove = triggerRect.top - minTop - 8;
+          const roomBelow = bottom - triggerRect.bottom - 8;
+          // Leave room for the header, actions and a scrollable section before
+          // letting a short pane flip to the lower side of its trigger.
+          const above = roomAbove >= 180 || roomAbove >= roomBelow;
+          const available = above ? roomAbove : roomBelow;
+          const maxHeight = Math.max(1, Math.min(540, available));
+          const panelHeight = Math.min(maxHeight, panel.offsetHeight || maxHeight);
+          const maxTop = Math.max(minTop, bottom - panelHeight);
           const requestedTop = above ? triggerRect.top - panelHeight - 8 : triggerRect.bottom + 8;
           const top = Math.max(minTop, Math.min(requestedTop, maxTop));
           setPosition((previous) => {
-            const next = { left, top, width, maxHeight, above };
+            const next = { left, top, width, maxHeight };
             if (previous && Math.abs(previous.left - left) < 0.5 &&
               Math.abs(previous.top - top) < 0.5 && previous.width === width &&
-              previous.maxHeight === maxHeight && previous.above === above) return previous;
+              previous.maxHeight === maxHeight) return previous;
             return next;
           });
         };
@@ -1448,7 +1530,13 @@ body[data-ds-dark-theme] .dcr-scope-mark.is-banked,body[data-ds-dark-theme] .dcr
           ? new ResizeObserver(updatePosition)
           : null;
         if (observer) {
-          if (triggerRef.current) observer.observe(triggerRef.current);
+          if (triggerRef.current) {
+            observer.observe(triggerRef.current);
+            // A responsive sidebar can move the composer after the viewport resize
+            // event without changing the trigger's size.
+            const seat = triggerRef.current.closest('[data-composer-seat]');
+            if (seat) observer.observe(seat);
+          }
           if (panelRef.current) observer.observe(panelRef.current);
         }
         return () => {
@@ -1460,21 +1548,43 @@ body[data-ds-dark-theme] .dcr-scope-mark.is-banked,body[data-ds-dark-theme] .dcr
           }
           if (observer) observer.disconnect();
         };
-      }, [open, position && position.width, position && position.maxHeight, status.entry, status.phase]);
+      }, [open, statusRow, position && position.width, position && position.maxHeight, status.entry, status.phase]);
 
       const closeToTrigger = () => {
         setOpen(false);
         if (triggerRef.current) triggerRef.current.focus({ preventScroll: true });
       };
       const panelStyle = position
-        ? { left: position.left + 'px', top: position.top + 'px', width: position.width + 'px', maxHeight: position.maxHeight + 'px', transformOrigin: position.above ? 'bottom left' : 'top left' }
+        ? { left: position.left + 'px', top: position.top + 'px', width: position.width + 'px', maxHeight: position.maxHeight + 'px' }
         : { left: '0px', top: '0px', visibility: 'hidden' };
+
+      const trigger = h(
+        'button',
+        {
+          ref: triggerRef,
+          type: 'button',
+          className: statusRow ? 'dcr-dock-button dcr-status-button' : 'dcr-dock-button',
+          'aria-label': chipTypeLabel ? [dockAccessibleLabel, chipTypeLabel, chipProbability].join(' · ') : dockAccessibleLabel,
+          title: chipTypeLabel ? dockAccessibleLabel + ' · ' + chipTypeLabel : dockAccessibleLabel,
+          'aria-haspopup': 'dialog',
+          'aria-expanded': open,
+          'aria-controls': panelId.current,
+          onClick: () => setOpen(!open),
+        },
+        h('span', { className: 'dcr-dock-glyph' }, chipProbability ? ScopeMark({ type: verdict.type, t, size: 15 }) : h(ResetGlyph, { size: 16 })),
+        h('span', { className: 'dcr-dock-label' },
+          chipProbability
+            ? [t('chipName') + ' ', h('span', { className: 'dcr-chip-probability', key: 'probability' }, chipProbability)]
+            : t('chipName'),
+        ),
+      );
 
       return h(
         React.Fragment,
         null,
         h(Styles, null),
-        h(
+        h('span', { ref: slotRef, hidden: true }),
+        statusRow ? createPortal(trigger, statusRow) : h(
           'div',
           { className: 'dcr-dock' },
           // Reserve the current language's widest label outside the button so
@@ -1487,27 +1597,12 @@ body[data-ds-dark-theme] .dcr-scope-mark.is-banked,body[data-ds-dark-theme] .dcr
               h('span', null, t('chipName') + ' 100%'),
             ),
           ),
-          h(
-            'button',
-            {
-              ref: triggerRef,
-              type: 'button',
-              className: 'dcr-dock-button',
-              'aria-label': chipTypeLabel ? [dockAccessibleLabel, chipTypeLabel, chipProbability].join(' · ') : dockAccessibleLabel,
-              title: chipTypeLabel ? dockAccessibleLabel + ' · ' + chipTypeLabel : dockAccessibleLabel,
-              'aria-expanded': open,
-              'aria-controls': panelId.current,
-              onClick: () => setOpen(!open),
-            },
-            h('span', { className: 'dcr-dock-glyph' }, chipProbability ? ScopeMark({ type: verdict.type, t, size: 15 }) : h(ResetGlyph, { size: 16 })),
-            h('span', { className: 'dcr-dock-label' },
-              chipProbability
-                ? [t('chipName') + ' ', h('span', { className: 'dcr-chip-probability', key: 'probability' }, chipProbability)]
-                : t('chipName'),
-            ),
-          ),
+          trigger,
+        ),
+          // The composer seat contains fixed descendants. The dock slot requires
+          // overlays to portal to the body so their coordinates stay viewport-relative.
           open
-            ? h(
+            ? createPortal(h(
                 'section',
                 {
                   ref: panelRef,
@@ -1528,6 +1623,7 @@ body[data-ds-dark-theme] .dcr-scope-mark.is-banked,body[data-ds-dark-theme] .dcr
                   h(
                     'button',
                     {
+                      ref: closeButtonRef,
                       type: 'button',
                       className: 'dcr-panel-icon-button',
                       onClick: closeToTrigger,
@@ -1537,19 +1633,21 @@ body[data-ds-dark-theme] .dcr-scope-mark.is-banked,body[data-ds-dark-theme] .dcr
                     h(IconClose, { size: 16 }),
                   ),
                 ),
-                status.phase === 'error'
-                  ? h(ErrorBox, { status, t, onRetry: () => ensureStatus(lang, true), now })
-                : null,
-                h(ResetSummary, { data, t, localeId, now }),
-                h(TiboPost, {
-                  preferredLanguage: postLanguage,
-                  onLanguageChange: setPostLanguage,
-                  data,
-                  relatedSchedules,
-                  localeId,
-                  t,
-                }),
-                h(ResetHistory, { data, t, localeId, now }),
+                h('div', { className: 'dcr-content' },
+                  status.phase === 'error'
+                    ? h(ErrorBox, { status, t, onRetry: () => ensureStatus(lang, true), now })
+                    : null,
+                  h(ResetSummary, { data, t, localeId, now }),
+                  h(TiboPost, {
+                    preferredLanguage: postLanguage,
+                    onLanguageChange: setPostLanguage,
+                    data,
+                    relatedSchedules,
+                    localeId,
+                    t,
+                  }),
+                  h(ResetHistory, { data, t, localeId, now }),
+                ),
                 h(
                   'footer',
                   { className: 'dcr-foot' },
@@ -1579,9 +1677,8 @@ body[data-ds-dark-theme] .dcr-scope-mark.is-banked,body[data-ds-dark-theme] .dcr
                     ),
                   ),
                 ),
-              )
+              ), document.body)
             : null,
-        ),
       );
     }
 
